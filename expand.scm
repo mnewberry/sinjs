@@ -69,119 +69,131 @@
   ;;; this is what to do if we recognize a form as a combination.
   (define (combination) (map (cut expand <> env) form))
 
-  ((number? form) `(quote ,form))
-  ((boolean? form) `(quote ,form))
-  ((string? form) `(quote ,form))
-  ((char? form) `(quote ,form))
+  (cond
+   ((number? form) `(quote ,form))
+   ((boolean? form) `(quote ,form))
+   ((string? form) `(quote ,form))
+   ((char? form) `(quote ,form))
 
-  ((identifier? form)
-   (let ((val (identifier-rename form env)))
-     (cond
-      ((symbol? val) val)
-      ((pair? val) (error expand "illegal use of syntax keyword"))
-      ((not val) `(top-level-ref ,(identifier->name form))))))
+   ((identifier? form)
+    (let ((val (identifier-rename form env)))
+      (cond
+       ((symbol? val) val)
+       ((pair? val) (error expand "illegal use of syntax keyword"))
+       ((not val) `(top-level-ref ,(identifier->name form))))))
 
-  ;;; combination with nothing special
-  ((and (pair? form)
-	(not (identifier? (car form))))
-   (combination))
+   ;; combination with nothing special
+   ((and (pair? form)
+	 (not (identifier? (car form))))
+    (combination))
 
-  (else
-   (let ((starter (identifier-rename (car form) env)))
-     (cond
-      ;; if starter is a pair, then this is a macro invocation.
-      ;; expand it and recurse.
-      ((pair? starter)
-       (if (and (pair? (car starter))
-		(eq? (caar starter) 'syntax-rules))
-	   (expand (expand-syntax-rules form (car starter) (cdr starter) env) env)
-	   (error expand "internal bad syntax transformer spec")))
+   (else
+    (let ((starter (identifier-rename (car form) env)))
+      (cond
+       ;; if starter is a pair, then this is a macro invocation.
+       ;; expand it and recurse.
+       ((pair? starter)
+	(if (and (pair? (car starter))
+		 (eq? (caar starter) 'syntax-rules))
+	    (expand (expand-syntax-rules form (car starter) (cdr starter) env) 
+		    env)
+	    (error expand "internal bad syntax transformer spec")))
 
-      ;; if starter is not a pair, and not #f, then it is locally bound,
-      ;; and therefore not a syntactic keyword.
-      (starter (combination))
+       ;; if starter is not a pair, and not #f, then it is locally bound,
+       ;; and therefore not a syntactic keyword.
+       (starter (combination))
 
-      ;; so we have a top-level binding. if it is a synactic keyword,
-      ;; dtrt, otherwise, it's a combination.
-      (case (identifier->name (car form))
-	((quote) form)			;nothing to do [don't expand inside!]
+       ;; so we have a top-level binding. if it is a synactic keyword,
+       ;; dtrt, otherwise, it's a combination.
+       (else
+	(case (identifier->name (car form))
+	  ((quote) form)		;nothing to do [don't expand inside!]
 
-	((set!)
-	 (let ((var (cadr form))
-	       (value (expand (caddr form) env)))
-	   (unless (identifier? var)
-	     (error expand "bad identifier in set!"))
-	   (let ((r (identifier-rename var env)))
-	     (cond
-	      ((symbol? r) `(set! ,r ,value))
-	      ((pair? r) (error expand "illegal use of syntax keyword"))
-	      ((not val) `(top-level-set! ,(identifier->name var) ,value))))))
+	  ((set!)
+	   (let ((var (cadr form))
+		 (value (expand (caddr form) env)))
+	     (unless (identifier? var)
+	       (error expand "bad identifier in set!"))
+	     (let ((r (identifier-rename var env)))
+	       (cond
+		((symbol? r) `(set! ,r ,value))
+		((pair? r) (error expand "illegal use of syntax keyword"))
+		((not r) `(top-level-set! ,(identifier->name var) ,value))))))
 
-	((if) 
-	 (if (= (length form) 3)
-	      `(if (expand (cadr form) env)
-		   (expand (caddr form) env)
-		   '(quote oh-mickey-youre-so-fine-you-blow-my-mind-hey-mickey))
-	      `(if (expand (cadr form) env)
-		   (expand (caddr form) env)
-		   (expand (cadddr form) env))))
+	  ((if) 
+	   (if (= (length form) 3)
+	       `(if ,(expand (cadr form) env)
+		    ,(expand (caddr form) env)
+		    (quote oh-mickey-youre-so-fine-you-blow-my-mind-hey-mickey))
+	       `(if ,(expand (cadr form) env)
+		    ,(expand (caddr form) env)
+		    ,(expand (cadddr form) env))))
 
-	((begin)
-	 `(begin ,@(map (cut expand <> env) (cdr form))))
+	  ((begin)
+	   `(begin ,@(map (cut expand <> env) (cdr form))))
 
-	;; each binding is a mapping from an identifier to
-	;; new renamed thing.  We leave the identifiers alone,
-	;; which guarantees that if we are here binding a
-	;; variable inserted by a macro template, the renaming
-	;; we stick in the environment refers only to the ID that
-	;; was in the macro, and not other uses of the same name
-	;; from the macro call's environment.
-	((lambda)
-	 (let ((bindings (map-formals (lambda (id)
-					(cons id 
-					      (uniquify (identifier->name id))))
-				      (cadr form))))
-	   `(lambda ,(map-formals cdr bindings)
-	      ,@(map (cute expand <> (append bindings env))
-		     (cddr form)))))
+	  ;; each binding is a mapping from an identifier to
+	  ;; new renamed thing.  We leave the identifiers alone,
+	  ;; which guarantees that if we are here binding a
+	  ;; variable inserted by a macro template, the renaming
+	  ;; we stick in the environment refers only to the ID that
+	  ;; was in the macro, and not other uses of the same name
+	  ;; from the macro call's environment.
+	  ((lambda)
+	   (let ((bindings (map-formals (lambda (id)
+					  (cons id (uniquify
+						    (identifier->name id))))
+					(cadr form))))
+	     `(lambda ,(map-formals (lambda (id) (cdr (assq id bindings)))
+				    (cadr form))
+		,@(expand-body (cddr form) (append bindings env)))))
 
-	((let-syntax)
-	 (let ((binding-list (cadr form))
-	       (body (cddr form)))
-	   (expand `(begin ,@body)
-		   (append 
-		    (map (lambda (name transformer)
-			   (unless (identifier? name)
-			     (error expand "bad let-syntax syntax"))
-			   (unless (and (pair? transformer)
-					(eq? (car transformer)
-					     'syntax-rules))
-			     (error expand "bad let-syntax transformer"))
-			   `(,name . (,transformer . ,env)))
-			 binding-list)
-		    env))))
+	  ;; note that let-syntax and letrec-syntax create a
+	  ;; LAMBDA and not a BEGIN.  this makes sure that
+	  ;; they don't get spliced the way BEGIN does, so that
+	  ;; internal definitions inside them are treated as
+	  ;; properly internal.  That is correct for R5RS,
+	  ;; but R6RS changes it (see R6RS 11.2).
+	  ((let-syntax)
+	   (let ((binding-list (cadr form))
+		 (body (cddr form)))
+	     `((lambda () 
+		 ,@(expand-body body
+				(append 
+				 (map (lambda (name transformer)
+					(unless (identifier? name)
+					  (error expand 
+						 "bad let-syntax syntax"))
+					(unless (and (pair? transformer)
+						     (eq? (car transformer)
+							  'syntax-rules))
+					  (error expand 
+						 "bad let-syntax transformer"))
+					`(,name . (,transformer . ,env)))
+				      binding-list)
+				 env))))))
 
-	((letrec-syntax)
-	 (let* ((binding-list (cadr form))
-		(body (cddr form))
-		(env-add (map (lambda (name transformer)
-				(unless (identifier? name)
-				  (error expand "bad letrec-syntax syntax"))
-				(unless (and (pair? transformer)
-					     (eq? (car transformer)
-						  'syntax-rules))
-				  (error expand 
-					 "bad letrec-syntax transformer"))
-				`(,name . (,transformer . #f)))))
-		(new-env (append env-add env)))
-	   (for-each
-	    (lambda (env-element)
-	      (set-cdr! (cdr env-element) new-env)))
-	   (expand `(begin ,@body) new-env)))
+	  ((letrec-syntax)
+	   (let* ((binding-list (cadr form))
+		  (body (cddr form))
+		  (env-add (map (lambda (name transformer)
+				  (unless (identifier? name)
+				    (error expand "bad letrec-syntax syntax"))
+				  (unless (and (pair? transformer)
+					       (eq? (car transformer)
+						    'syntax-rules))
+				    (error expand 
+					   "bad letrec-syntax transformer"))
+				  `(,name . (,transformer . #f)))))
+		  (new-env (append env-add env)))
+	     (for-each
+	      (lambda (env-element)
+		(set-cdr! (cdr env-element) new-env)))
+	     `((lambda () ,@(expand-body body new-env)))))
 
-	;; top level binding, but not to a syntactic keyword, so it's
-	;; just a combination
-	(else (combination)))))))
+	  ;; top level binding, but not to a syntactic keyword, so it's
+	  ;; just a combination
+	  (else (combination)))))))))
 
 ;;; map across a lambda list.
 (define (map-formals proc formals)
@@ -192,19 +204,112 @@
 			  (map-formals proc (cdr formals))))
    (else (error map-formals "bad lambda list"))))
 
+;;; expand all first-level syntax in a form, but leave the rest alone.
+(define (expand-first-syntax form env)
+  (if (or (identifier? form) 
+	  (not (pair? form))
+	  (not (identifier? (car form))))
+      form
+      (let ((starter (identifier-rename (car form) env)))
+	(cond
+	 ((or (symbol? starter) (not starter)) form)
+	 ((and (pair? (car starter))
+	       (eq? (caar starter) 'syntax-rules))
+	  (expand-first-syntax (expand-syntax-rules form (car starter)
+						    (cdr starter) env)
+			       env))
+	 (else
+	  (error expand-first-syntax "internal bad syntax transform spec"))))))
+
+;;; turn an implicit LAMBDA define (if this is one) into 
+;;; a correct version.  make sure we observe hygiene when inserting
+;;; the keyword LAMBDA into the output.
+(define (clean-define defn)
+  (if (identifier? (cadr defn))
+      ;; normal definition
+      (if (= (length defn) 3)
+	  defn
+	  (error clean-define "definition too long"))
+      ;; implicit lambda
+      (if (>= (length defn) 3)
+	  (let ((name (caadr defn))
+		(formals (cdadr defn))
+		(body (cddr defn))
+		(magic-lambda (list ***special-binding 'lambda #f)))
+	    `(,(car defn) ,name (,magic-lambda ,formals ,@body))))))
+
+;;; expand a body in the specified environment.
+;;; we need expand-first-syntax because we must allow syntax
+;;; that produces (define ...) forms, without then going inside them and
+;;; doing the identifier renaming (since we don't yet know what the 
+;;; defined identifiers are!).  Thank God R5RS doesn't allow internal
+;;; syntax definitions, or this would be nearly impossible.
+(define (expand-body forms env)
+
+  ;;; Peel off internal definitions from the front of FORMS
+  ;;; and when they're all taken care of, use FINISH-BODY to
+  ;;; construct the result.
+  (define (expand-body1 forms defns)
+    (if (null? forms) 
+	(finish-body defns)
+	(let ((primo (expand-first-syntax (car forms) env)))
+	  (if (and (pair? primo)	;list syntax
+		   (identifier? (car primo)) ;begins with identifier
+		   (not (identifier-rename (car primo env))) ;not locally bound
+		   (or (eq? (identifier->name (car primo))
+			    'define) ;and is a definition
+		       (eq? (identifier->name (car primo))
+			    'begin))) ;or might be
+	      (if (eq? (identifier->name (car primo)) 'begin)
+		  ;; splice
+		  (expand-body1 (append (cdr primo) forms) defns)
+		  ;; a definition
+		  (expand-body1 (cdr forms) (cons primo defns)))
+	      (finish-body defns forms)))))
+
+  ;; if there are definitions, turn them into an implicit letrec-type
+  ;; construct and expand that. note that we are careful to make sure
+  ;; the LAMBDA and SET! we insert have their top-level bindings since
+  ;; they are passed to EXPAND.
+  (define (finish-body defns exprs)
+    (if (null? defns)
+	(map (cut expand <> env) exprs)
+	(let* ((defns (map clean-define defns))
+	       (vars (map cadr defns))
+	       (vals (map caddr defns))
+	       (magic-lambda (list ***special-binding 'lambda #f))
+	       (magic-set! (list ***special-binding 'set! #f)))
+	  (expand
+	   `((,magic-lambda ,vars
+		,@(map (lambda (var val) `(,magic-set! ,var ,val))
+		       vars vals)
+		,@exprs)
+	     ,@(list (length vars) 
+		     'when-i-get-older-losing-my-hair-many-years-form-now))
+	   env))))
+
+  (expand-body1 forms '()))
+  
+
 ;;; Note that everything in syntax transformers could be
 ;;; ***special-binding objects, if a macro expanded into a syntax binding
 ;;; construct.
 
 ;;; Expand FORM according to the specified syntax-rules TRANSFORMER.
 ;;; DEF-ENV is the environment in which the transformer was specified;
-;;; and USE-ENV is the environment in which FORM was found.
+;;; and USE-ENV is the environment in which FORM was found.  If the
+;;; transformer is specified in a top-level DEFINE-SYNTAX, then DEF-ENV
+;;; will be #f, and the definition environment is the *current* top-level
+;;; environment.  This way top-level DEFINE-SYNTAX definitions can use
+;;; each other recursively.  R6RS will require a change to this, since
+;;; it allows internal DEFINE-SYNTAX.
 (define (expand-syntax-rules form transformer def-env use-env)
-  (if (identifier? (cadr transformer))
-      (expand-syntax-rules1 form (cadr transformer) (caddr transformer)
-			    (cdddr transformer) def-env use-env)
-      (expand-syntax-rules1 form '... (cadr transformer)
-			    (cddr transformer) def-env use-env)))
+  (let ((def-env (or def-env top-level-environment)))
+    (if (identifier? (cadr transformer))
+	(expand-syntax-rules1 form (cadr transformer) (caddr transformer)
+			      (cdddr transformer) def-env use-env)
+	(expand-syntax-rules1 form '... (cadr transformer)
+			      (cddr transformer) def-env use-env))))
 
 ;;; used below to tag illegal pattern variables in ellipsis contexts
 (define bad-object (cons 'bad 'object))
@@ -261,7 +366,8 @@
 	       (error expand-syntax "pattern variable with too few ellipses"))
 	     (cdr p)))
        ;; A literal identifier is being inserted into the expansion.
-       ;; Stick in an appropriate ***special-binding.
+       ;; Stick in an appropriate ***special-binding or use the one
+       ;; we already have if this is a repeat.
        ((assq template renamings) => cdr)
        (else
 	;; the expansion is the value this has inside the 
@@ -271,19 +377,23 @@
 	  (set! renamings (cons (cons template renaming) renamings))
 	  renaming))))
 
-     ((pair? pattern)
-      (if (and (pair? (cdr pattern))
-	       (eq? ellipsis (cadr pattern)))
+     ((pair? template)
+      (if (and (pair? (cdr template))
+	       (eq? ellipsis (cadr template)))
 	  (begin
-	    (unless (null? (caddr pattern))
-	      (error match-syntax "non-final ellipsis in template"))
-	    (let 
+	    (unless (null? (caddr template))
+	      (error expand-syntax "non-final ellipsis in template"))
+	    (let-values (((base splices) (destruct-ellipsed pairing)))
+	      (map (lambda (newbies)
+		     (expand-syntax (car template) (append newbies base)))
+		   (splice-ellipsed splices))))
+	  (cons (expand-syntax (car template) pairing)
+		(expand-syntax (cdr template) pairing))))
 
-     
-       
+     (else
+      (error expand-syntax "bad datum in syntax template"))))
 
-
-  (unless (symbol? ellipsis)
+  (unless (identifier? ellipsis)
     (error expand-syntax-rules "bad ellipsis in syntax-rules"))
   (unless (list? literals)
     (error expand-syntax-rules "bad literals in syntax-rules"))
@@ -305,13 +415,13 @@
 (define (assemble-ellipsed matches)
   (map
    (lambda (key)
-     (cons (list key) (map (cut alist-ref var <> equal?) matches)))
+     (cons (list key) (map (cut alist-ref key <> equal?) matches)))
    (car matches)))
 
 ;;; destruct an ellipsed pairings assoc list; return two values
 ;;; first the base list which will be the same for all the
 ;;; things to do, and second, a list of pairings to append on, one
-;;; per invocation.
+;;; per invocation: a suitable argument for splice-ellipsed.
 (define (destruct-ellipsed pairings)
   (if (null? pairings)
       (values '() '())
@@ -331,17 +441,16 @@
 ;;; Splice these into what we need to add to template assembly
 ;;; pairings.
 ;;; that is
-;;; ((a . (1 2)) (b . (3 4))) => (((a . 1) (b . 3)) ((a . 2) (b . 4)))
-(define (assemble-ellipsed splices)
-  (if (null? splices)
-      '()
-      (begin
-	(let ((n (length (cdar splices))))
-	  (unless (every (lambda (splice)
-			   (= n (length splice)))
-			 splices)
-	    (error assemble-ellipsed "ellipsis length mismatch"))
-	  
-    
-    
-  
+;;; example:
+;;; ((a . (1 2)) (b . (3 4)) (c . (5 6)) 
+;;;   => (((a . 1) (b . 3) (c . 5)) ((a . 2) (b . 4) (c . 6)))
+(define (splice-ellipsed splices)
+  (let ((names (map car splices))
+	(val-lists (map cdr splices)))
+    ;; names (a b c)
+    ;; val-lists ((1 2) (3 4) (5 6))
+    (apply map 
+	   ;; vals (1 3 5) and then (2 4 6)
+	   (lambda vals
+	     (map cons names vals))
+	   val-lists)))

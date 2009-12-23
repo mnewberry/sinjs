@@ -2,59 +2,81 @@
 
 (use (srfi 1))
 
+;;; Codegen has a list of inlinable procedures, and here we create
+;;; a new expression type which codegen uses to emit those calls.
+(define inline-tag (cons 'inlinable 'tag))
+
 ;;; We can beta reduce these argument types
 (define (reducable? form)
   (or (symbol? form)
       (and (pair? form)
-	   (or (eq? (car form) 'quote)
-	       (eq? (car form) 'top-level-ref)
-	       (eq? (car form) 'lambda)))))
+	   (let ((head (car form)))
+	     (or (memq head '(quote top-level-ref lambda))
+		 (and (pair? head)
+		      (eq? (car head) inline-tag)))))))
 
-(define (simplify-1 form)
-  (cond
-   ((symbol? form) form)
-   ((pair? form)
-    (case (car form)
-      ((quote) form)
-      ((set!) form)
-      ((top-level-set!) form)
+(define (simplify form unsafes)
+  (define (inline-ok? name)
+    (and (memq name inlinables)
+	 (not (memq name unsafes))))
 
-      ((top-level-ref) form)
+  (define (simplify-1 form)
+    (cond
+     ((symbol? form) form)
+     ((pair? form)
+      (case (car form)
+	((quote) form)
+	((set!) form)
+	((top-level-set!) form)
 
-      ((if)
-       (let ((test (cadr form))
-	     (true-branch (caddr form))
-	     (false-branch (cadddr form)))
-	 `(if ,(simplify-1 test) 
-	      ,(simplify-1 true-branch) 
-	      ,(simplify-1 false-branch))))
+	((top-level-ref) form)
 
-      ((lambda) 
-       (let ((args (cadr form))
-	     (value (caddr form)))
-	 `(lambda ,args ,(simplify-1 value))))
+	((if)
+	 (let ((test (cadr form))
+	       (true-branch (caddr form))
+	       (false-branch (cadddr form)))
+	   `(if ,(simplify-1 test) 
+		,(simplify-1 true-branch) 
+		,(simplify-1 false-branch))))
 
-      (else
-       (let ((procedure (car form))
-	     (args (cdr form)))
-	 (cond
-	  ;; If all the arguments to the procedure are reducable,
-	  ;; then do a beta reduction
-	  ((and (list? procedure)
-		(eq? (car procedure) 'lambda)
-		(list? (cadr procedure)) ;no rest parameter
-		(= (length (cadr procedure)) (length args))
-		(every reducable? args))
-	   (beta-reduce (caddr procedure) 
-			(map cons (cadr procedure) args)))
+	((lambda) 
+	 (let ((args (cadr form))
+	       (value (caddr form)))
+	   `(lambda ,args ,(simplify-1 value))))
 
-	  (else (map simplify-1 form)))))))))
+	(else
+	 (let ((procedure (car form))
+	       (args (cdr form)))
+	   (cond
+	    ;; Not really a procedure, but an (INLINE foo) special form
+	    ((and (eq? procedure inline-tag))
+	     form)
 
-(define (simplify form)
+	    ;; If all the arguments to the procedure are reducable,
+	    ;; then do a beta reduction
+	    ((and (list? procedure)
+		  (eq? (car procedure) 'lambda)
+		  (list? (cadr procedure)) ;no rest parameter
+		  (= (length (cadr procedure)) (length args))
+		  (every reducable? args))
+	     (beta-reduce (caddr procedure) 
+			  (map cons (cadr procedure) args)))
+	    
+	    ;; If the procedure is inlinable mark that for code-gen
+	    ((and (pair? procedure)
+		  (eq? (car procedure) 'top-level-ref)
+		  (inline-ok? (cadr procedure)))
+	     ;;; ((top-level-ref +) k a b) => (k ((INLINE +) a b))
+	     `(,(car args)
+	       ((,inline-tag ,(cadr procedure)) ,@(cdr args))))
+
+	    (else (map simplify-1 form)))))))))
+
   (let ((f (simplify-1 form)))
     (if (equal? f form)
 	form
-	(simplify f))))
+	(simplify f unsafes))))
+
 
 (define (beta-reduce form mappings)
   (cond

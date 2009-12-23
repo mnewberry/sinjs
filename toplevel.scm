@@ -1,29 +1,21 @@
 ;;; Toplevel compilation handling
 
-;;; Toplevel compilation requires special magic.  We use the special
-;;; TOP-LEVEL-PREPARE function, which handles compilation of the
-;;; various special top level forms.
-
 ;;; This is like map, but the values from each invocation are spliced
 ;;; together, and we promise to do the mapping in order.
 (define (map-values proc lyst)
   (if (null? lyst)
       '()
       (call-with-values
-	  (proc (car lyst))
+	  (lambda () (proc (car lyst)))
 	(lambda vals (append vals (map-values proc (cdr lyst)))))))
+
+;;; Note that we never stick variable bindings in the top-level-environment.
+;;; This is used only to hold syntax definitions.
+(define top-level-environment '())
 
 ;;; compile top-level forms into a Javascript program.
 (define (top-level-compile-forms forms)
-  (define syntactic-env '())
-  (define (extend-syntactic-env name transformer)
-    (set! syntactic-env (cons (cons name transformer) syntactic-env)))
-
-  (let* ((prepared-forms (map-values (cut top-level-prepare <> 
-					  top-level-vals 
-					  syntactic-env
-					  extend-syntactic-env)
-				     forms))
+  (let* ((prepared-forms (map-values prepare forms))
 	 (unsafes (find-modifications prepared-forms)))
     (string-append sinjs-prologue
 		   (apply string-append 
@@ -31,38 +23,39 @@
 			       prepared-forms))
 		   sinjs-epilogue)))
 
-(define (top-level-prepare form syntactic-env extend-syntax)
-  (let ((form (expand form top-level-vars syntactic-env)))
-    ;; match special top-level thingies, but only if we aren't
-    ;; creating a binding for them.  note carefully that we can't
-    ;; go astray here on correct programs, because of the rules
-    ;; at the end of R5RS section 5.3.  NB: R6RS is different.
-    (if (and (pair? form))
-	(case (car form)
+;;; expand syntax first, check for top-level keywords, and then
+;;; do a full expansion.
+(define (prepare form)
+  (let ((form (expand-first-syntax form top-level-environment)))
+    (if (and (pair? form)
+	     (identifier? (car form)))
+	(case (identifier->name (car form))
 	  ((begin)
-	   (apply values
-		  (map-in-order top-level-prepare (cdr form))))
+	   (apply values (map-in-order prepare (cdr form))))
 
 	  ((define)
 	   ;; turn into a set! as per R5RS 5.2.1.
-	   (prepare `(set! ,(cadr form) ,(caddr form)) '()))
+	   `(top-level-set! ,(cadr form) 
+			    ,(expand (caddr form) top-level-environment)))
 
 	  ((define-syntax)
 	   (unless (and (list? form)
 			(= 3 (length form))
 			(symbol? (cadr form)))
-	     (error define-syntax "bad define-syntax syntax"))
-	   (extend-syntax (cadr form) (caddr form))
+	     (error prepare "bad define-syntax syntax"))
+	   (set! top-level-environment
+		 (cons (cons (cadr form) (cons (caddr form) #f))
+		       top-level-environment))
 	   (values))
 	  
 	  (else
-	   (prepare form '())))
-	(prepare form '()))))
+	   (expand form top-level-environment))))
+    (expand form top-level-environment)))
 
 (define (top-level-compile form unsafes)
   (let ((continuation 'sinjs_bounce))
     (string-append 
-     (compile (simplify (cps-transform form continuation)) unsafes)
+     (compile (simplify (cps-transform form continuation) unsafes))
      ";\n")))
 
 ;;; return a list of top-level variables bound by the specified forms

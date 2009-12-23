@@ -1,18 +1,25 @@
 ;;; Convert CPS code into compiled code.
 
-(define (compile form unsafes)
+(use (srfi 1))
 
-  (define inlinables
-    (lset-difference eq?
-		     '(+ *)
-		     unsafes))
+;;; an inlinable is a procedure which codegen can compile into direct
+;;; JS syntax.
+;;; Simplification is responsible for inserting these:
+;;;
+;;; ((top-level-ref +) k arg1 arg2)
+;;;   => (k ((INLINE +) arg1 arg2))
+;;;
+(define inlinables '(+ *))
+
+(define (compile form)
 
   (define (compile-inlining procedure args)
     (case procedure
-      ((+) (string-append "(" (compile-1 (cadr args)) 
-			  ")+(" (compile-1 (caddr args)) ")"))
-      ((*) (string-append "(" (compile-1 (cadr args)) 
-			  ")*(" (compile-1 (caddr args)) ")"))))
+      ((+) (string-append "(" (compile-1 (car args)) 
+			  ")+(" (compile-1 (cadr args)) ")"))
+      ((*) (string-append "(" (compile-1 (car args)) 
+			  ")*(" (compile-1 (cadr args)) ")"))
+      (else (error compile-inlining "bad inline procedure spec"))))
 
   (define (compile-formals formals)
     (cond
@@ -32,7 +39,7 @@
     (cond
    ;;; variables become JS variables [note, these are all locals]
      ((symbol? form) (symbol->string form))
-     
+
      ((pair? form)
       (case (car form)
 	((set!)
@@ -76,12 +83,19 @@
 			  "){return " (compile-1 expression) ";}")))
 
 	(else
-	 (if (and (pair? (car form))
-		  (eq? (caar form) 'top-level-ref)
-		  (memq (cadar form) inlinables))
-	     (compile-inlining (cadar form) (cdr form))
-	     (string-append "(" (compile-1 (car form)) ")(" 
-			    (compile-arguments (cdr form)) ")")))))
+	 (cond
+	  ;; inline tags are only allowed as CAR of combinations, and they
+	  ;; are caught below for that case directly.
+	  ((eq? (car form) inline-tag)
+	   (error compile "inline procedure tag escaped"))
+
+	  ((and (pair? (car form))
+		(eq? (caar form) inline-tag))
+	   (compile-inlining (cadar form) (cdr form)))
+
+	  (else
+	   (string-append "(" (compile-1 (car form)) ")(" 
+			  (compile-arguments (cdr form)) ")"))))))
      (else (error (format "unknown expression ~s\n" form)))))
 
   (compile-1 form))
