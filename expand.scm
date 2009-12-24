@@ -61,7 +61,6 @@
 (define (identifier-rename form env)
   (cond
    ((assq form env) => cdr)
-   ((and (pair? form) (eq? (car form) ***special-binding)) (cadr form))
    (else #f)))
 
 ;;; here is the basic syntax walker
@@ -255,7 +254,7 @@
 	(let ((primo (expand-first-syntax (car forms) env)))
 	  (if (and (pair? primo)	;list syntax
 		   (identifier? (car primo)) ;begins with identifier
-		   (not (identifier-rename (car primo env))) ;not locally bound
+		   (not (identifier-rename (car primo) env)) ;not locally bound
 		   (or (eq? (identifier->name (car primo))
 			    'define) ;and is a definition
 		       (eq? (identifier->name (car primo))

@@ -35,8 +35,9 @@
 
 	  ((define)
 	   ;; turn into a set! as per R5RS 5.2.1.
-	   `(top-level-set! ,(cadr form) 
-			    ,(expand (caddr form) top-level-environment)))
+	   (let ((d (clean-define form)))
+	     `(top-level-set! ,(cadr d) 
+			      ,(expand (caddr d) top-level-environment))))
 
 	  ((define-syntax)
 	   (unless (and (list? form)
@@ -49,13 +50,13 @@
 	   (values))
 	  
 	  (else
-	   (expand form top-level-environment))))
-    (expand form top-level-environment)))
+	   (expand form top-level-environment)))
+	(expand form top-level-environment))))
 
 (define (top-level-compile form unsafes)
   (let ((continuation 'sinjs_bounce))
     (string-append 
-     (compile (simplify (cps-transform form continuation) unsafes))
+     (compile-form (simplify (cps-transform form continuation) unsafes))
      ";\n")))
 
 ;;; return a list of top-level variables bound by the specified forms
@@ -82,7 +83,7 @@
       ((begin) (find-modifications (cdr form)))
       ((lambda) (find-modifications (cddr form)))
       ((top-level-set!) (cons (cadr form) ;the important one!
-			      (find-modifications caddr form)))
+			      (find-modifications (caddr form))))
       ((if) (append (find-modifications (cadr form))
 		    (find-modifications (caddr form))
 		    (find-modifications (cadddr form))))
@@ -93,8 +94,9 @@
   (string-append
    "function sinjs_bounce (value){return value;};\n"
    "var scheme_top_level = new Object();\n"
-   "scheme_top_level['+'] = function(k,a,b){return k(a+b);}\n"
-   "scheme_top_level['*'] = function(k,a,b){return k(a*b);}\n"))
+;   "scheme_top_level['+'] = function(k,a,b){return k(a+b);}\n"
+;   "scheme_top_level['*'] = function(k,a,b){return k(a*b);}\n"
+   ))
 
 (define sinjs-epilogue "")
 

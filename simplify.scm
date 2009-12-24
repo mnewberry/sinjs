@@ -26,10 +26,17 @@
      ((pair? form)
       (case (car form)
 	((quote) form)
-	((set!) form)
-	((top-level-set!) form)
-
 	((top-level-ref) form)
+
+	((set!) 
+	 (let ((var (cadr form))
+	       (val (caddr form)))
+	   `(set! ,var ,(simplify-1 val))))
+
+	((top-level-set!)
+	 (let ((var (cadr form))
+	       (val (caddr form)))
+	   `(top-level-set! ,var ,(simplify-1 val))))
 
 	((if)
 	 (let ((test (cadr form))

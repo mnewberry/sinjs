@@ -33,9 +33,22 @@
    ((pair? form)
     (case (car form)
       ((quote) `(,k ,form))
-      ((set!) `(,k ,form))
       ((top-level-ref) `(,k ,form))
-      ((top-level-set!) `(,k ,form))
+
+      ((set!)
+       (let ((var (cadr form))
+	     (val (caddr form))
+	     (setvar (uniquify 's)))
+	 (cps-transform val
+			`(lambda (,setvar)
+			   (,k (set! ,var ,setvar))))))
+      ((top-level-set!) 
+       (let ((var (cadr form))
+	     (val (caddr form))
+	     (setvar (uniquify 's)))
+	 (cps-transform val
+			`(lambda (,setvar)
+			   (,k (top-level-set! ,var ,setvar))))))
       
       ((define)
        (error cps-transform "illegal use of define"))

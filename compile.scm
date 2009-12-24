@@ -9,9 +9,9 @@
 ;;; ((top-level-ref +) k arg1 arg2)
 ;;;   => (k ((INLINE +) arg1 arg2))
 ;;;
-(define inlinables '(+ *))
+(define inlinables '(+ * - zero?))
 
-(define (compile form)
+(define (compile-form form)
 
   (define (compile-inlining procedure args)
     (case procedure
@@ -19,6 +19,9 @@
 			  ")+(" (compile-1 (cadr args)) ")"))
       ((*) (string-append "(" (compile-1 (car args)) 
 			  ")*(" (compile-1 (cadr args)) ")"))
+      ((-) (string-append "(" (compile-1 (car args))
+			  ")-(" (compile-1 (cadr args)) ")"))
+      ((zero?) (string-append "((" (compile-1 (car args)) ")===0)"))
       (else (error compile-inlining "bad inline procedure spec"))))
 
   (define (compile-formals formals)
@@ -52,6 +55,8 @@
 	 (let ((literal (cadr form)))
 	   (cond
 	    ((number? literal) (number->string literal))
+	    ((eq? literal #t) "true")
+	    ((eq? literal #f) "false")
 	    (else (error (format "unsupported literal ~s\n" literal))))))
 
 	((top-level-set!)
@@ -87,7 +92,7 @@
 	  ;; inline tags are only allowed as CAR of combinations, and they
 	  ;; are caught below for that case directly.
 	  ((eq? (car form) inline-tag)
-	   (error compile "inline procedure tag escaped"))
+	   (error compile-form "inline procedure tag escaped"))
 
 	  ((and (pair? (car form))
 		(eq? (caar form) inline-tag))
