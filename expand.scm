@@ -61,10 +61,12 @@
 (define (identifier-rename form env)
   (cond
    ((assq form env) => cdr)
+   ((pair? form) (caddr form))
    (else #f)))
 
 ;;; here is the basic syntax walker
 (define (expand form env)
+  (display (format "e ~s\n" (pform form)))
   ;;; this is what to do if we recognize a form as a combination.
   (define (combination) (map (cut expand <> env) form))
 
@@ -86,7 +88,7 @@
 	 (not (identifier? (car form))))
     (combination))
 
-   (else
+   ((pair? form)
     (let ((starter (identifier-rename (car form) env)))
       (cond
        ;; if starter is a pair, then this is a macro invocation.
@@ -159,40 +161,47 @@
 	     `((lambda () 
 		 ,@(expand-body body
 				(append 
-				 (map (lambda (name transformer)
-					(unless (identifier? name)
-					  (error expand 
-						 "bad let-syntax syntax"))
-					(unless (and (pair? transformer)
-						     (eq? (car transformer)
-							  'syntax-rules))
-					  (error expand 
-						 "bad let-syntax transformer"))
-					`(,name . (,transformer . ,env)))
+				 (map (lambda (binding)
+					(let ((name (car binding))
+					      (transformer (cadr binding)))
+					  (unless (identifier? name)
+					    (error expand 
+						   "bad let-syntax syntax"))
+					  (unless (and (pair? transformer)
+						       (eq? (car transformer)
+							    'syntax-rules))
+					    (error expand 
+						   "bad let-syntax transformer"))
+					  `(,name . (,transformer . ,env))))
 				      binding-list)
 				 env))))))
 
 	  ((letrec-syntax)
 	   (let* ((binding-list (cadr form))
 		  (body (cddr form))
-		  (env-add (map (lambda (name transformer)
-				  (unless (identifier? name)
-				    (error expand "bad letrec-syntax syntax"))
-				  (unless (and (pair? transformer)
-					       (eq? (car transformer)
-						    'syntax-rules))
-				    (error expand 
-					   "bad letrec-syntax transformer"))
-				  `(,name . (,transformer . #f)))))
+		  (env-add (map (lambda (binding)
+				  (let ((name (car binding))
+					(transformer (cadr binding)))
+				    (unless (identifier? name)
+				      (error expand "bad letrec-syntax syntax"))
+				    (unless (and (pair? transformer)
+						 (eq? (car transformer)
+						      'syntax-rules))
+				      (error expand 
+					     "bad letrec-syntax transformer"))
+				    `(,name . (,transformer . #f))))
+				binding-list))
 		  (new-env (append env-add env)))
 	     (for-each
 	      (lambda (env-element)
-		(set-cdr! (cdr env-element) new-env)))
+		(set-cdr! (cdr env-element) new-env))
+	      env-add)
 	     `((lambda () ,@(expand-body body new-env)))))
 
 	  ;; top level binding, but not to a syntactic keyword, so it's
 	  ;; just a combination
-	  (else (combination)))))))))
+	  (else (combination)))))))
+   (else (error expand "improper expression"))))
 
 ;;; map across a lambda list.
 (define (map-formals proc formals)
@@ -205,6 +214,7 @@
 
 ;;; expand all first-level syntax in a form, but leave the rest alone.
 (define (expand-first-syntax form env)
+  (display (format "efs ~a\n" (pform form)))
   (if (or (identifier? form) 
 	  (not (pair? form))
 	  (not (identifier? (car form))))
@@ -324,11 +334,12 @@
     (cond
      ((identifier? pattern)
       (if (memq pattern literals)
-	  (and (eq? (identifier-rename pattern def-env)
+	  (and (identifier? form)
+	       (eq? (identifier-rename pattern def-env)
 		    (identifier-rename form use-env))
 	       '())
-	  (cons pattern form)))
-   
+	  (list (cons pattern form))))
+
      ((null? pattern)
       (and (null? form)
 	   '()))
@@ -337,15 +348,20 @@
       (if (and (pair? (cdr pattern))
 	       (eq? ellipsis (cadr pattern)))
 	  (begin
-	    (unless (null? (caddr pattern))
+	    (unless (null? (cddr pattern))
 	      (error match-syntax "non-final ellipsis in pattern"))
 	    (and (list? form)
-		 (assemble-ellipsed (map (cut match-syntax <> (car pattern)) 
-					 form))))
-	  (let ((match-car (match-syntax (car form) (car pattern))))
-	    (and match-car
-		 (append match-car
-			 (match-syntax (cdr form) (cdr pattern)))))))
+		 (let ((matches (map (cut match-syntax <> (car pattern))
+				     form)))
+		   (and (every identity matches)
+			(assemble-ellipsed matches)))))
+	  (and (pair? form)
+	       (not (identifier? form))
+	       (let ((match-car (match-syntax (car form) (car pattern)))
+		     (match-cdr (match-syntax (cdr form) (cdr pattern))))
+		 (and match-car
+		      match-cdr
+		      (append match-car match-cdr))))))
      (else
       (error match-syntax "unsupported pattern"))))
 
@@ -380,17 +396,17 @@
       (if (and (pair? (cdr template))
 	       (eq? ellipsis (cadr template)))
 	  (begin
-	    (unless (null? (caddr template))
+	    (unless (null? (cddr template))
 	      (error expand-syntax "non-final ellipsis in template"))
 	    (let-values (((base splices) (destruct-ellipsed pairing)))
+	      (display (format "template ~a\n pairing ~a\n base ~a\n splices ~a\n" template pairing base splices))
 	      (map (lambda (newbies)
 		     (expand-syntax (car template) (append newbies base)))
 		   (splice-ellipsed splices))))
 	  (cons (expand-syntax (car template) pairing)
 		(expand-syntax (cdr template) pairing))))
 
-     (else
-      (error expand-syntax "bad datum in syntax template"))))
+     (else template)))
 
   (unless (identifier? ellipsis)
     (error expand-syntax-rules "bad ellipsis in syntax-rules"))
@@ -399,22 +415,29 @@
   (unless (list? rules)
     (error expand-syntax-rules "bad ruleset in syntax-rules"))
   
+  (display (format "expanding ~a\n" (pform form)))
   (let next ((rules rules))
     (when (null? rules)
       (error expand-syntax-rules "syntax match failure"))
     (unless (and (list? (car rules))
 		 (= (length (car rules)) 2))
       (error expand-syntax-rules "bad rule in syntax-rules"))
+    (display (format "trying ~a\n" (caar rules)))
     (let ((pairing (match-syntax (cdr form) (cdaar rules))))
       (if pairing
-	  (expand-syntax (cadar rules) pairing)
+	  (begin
+	    (display (format "template ~a\n" (pform (cadar rules))))
+	    (let ((x (expand-syntax (cadar rules) pairing)))
+	      (display (format "result ~a\n" (pform x)))
+	      x))
 	  (next (cdr rules))))))
 
 ;;; matches is a list of match lists.  Splice them together.
 (define (assemble-ellipsed matches)
   (map
-   (lambda (key)
-     (cons (list key) (map (cut alist-ref key <> equal?) matches)))
+   (lambda (match-pair)
+     (let ((key (car match-pair)))
+       (cons (list key) (map (cut alist-ref key <> equal?) matches))))
    (car matches)))
 
 ;;; destruct an ellipsed pairings assoc list; return two values
@@ -425,16 +448,19 @@
   (if (null? pairings)
       (values '() '())
       (let-values (((base per) (destruct-ellipsed (cdr pairings))))
-	(cond
-	 ((identifier? (car pairings))
-	  (values (cons (cons (car pairings) bad-object) base)
-		  per))
-	 ((identifier? (caar pairings))
-	  (values base 
-		  (cons (car pairings) per)))
-	 (else
-	  (values (cons (caar pairings) base)
-		  per))))))
+	(let* ((this (car pairings))
+	       (key (car this))
+	       (val (cdr this)))
+	  (cond
+	   ((identifier? key)
+	    (values (cons (cons key bad-object) base)
+		    per))
+	   ((identifier? (car key))
+	    (values base 
+		    (cons (cons (car key) val) per)))
+	   (else
+	    (values (cons (cons (car key) val) base)
+		    per)))))))
 
 ;;; splices is an alists.  Each value in it should be the same length.
 ;;; Splice these into what we need to add to template assembly
@@ -453,3 +479,25 @@
 	   (lambda vals
 	     (map cons names vals))
 	   val-lists)))
+
+;;; like write, but with special magic for identifiers (the problem is
+;;; that if an id is special-bound to a syntax transformer, the
+;;; transformer includes a reference to its own environment, which in
+;;; the case of letrec-syntax, is a circular structure) so we don't
+;;; print the renaming of specially bound identifiers.
+(define (pform form)
+  (cond
+   ((symbol? form) (symbol->string form))
+   ((pair? form) 
+    (if (eq? (car form) ***special-binding)
+	(string-append "SPECIAL-" (symbol->string (cadr form)))
+	(string-append "(" (pform (car form)) (prest (cdr form)))))
+   (else (format "~s" form))))
+
+(define (prest form)
+  (cond
+   ((null? form) ")")
+   ((pair? form) (string-append " " (pform (car form)) (prest (cdr form))))
+   (else (string-append " . " (pform form) ")"))))
+
+  
