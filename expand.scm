@@ -66,7 +66,6 @@
 
 ;;; here is the basic syntax walker
 (define (expand form env)
-  (display (format "e ~s\n" (pform form)))
   ;;; this is what to do if we recognize a form as a combination.
   (define (combination) (map (cut expand <> env) form))
 
@@ -214,7 +213,6 @@
 
 ;;; expand all first-level syntax in a form, but leave the rest alone.
 (define (expand-first-syntax form env)
-  (display (format "efs ~a\n" (pform form)))
   (if (or (identifier? form) 
 	  (not (pair? form))
 	  (not (identifier? (car form))))
@@ -260,7 +258,7 @@
   ;;; construct the result.
   (define (expand-body1 forms defns)
     (if (null? forms) 
-	(finish-body defns)
+	(finish-body defns forms)
 	(let ((primo (expand-first-syntax (car forms) env)))
 	  (if (and (pair? primo)	;list syntax
 		   (identifier? (car primo)) ;begins with identifier
@@ -281,6 +279,8 @@
   ;; the LAMBDA and SET! we insert have their top-level bindings since
   ;; they are passed to EXPAND.
   (define (finish-body defns exprs)
+    (when (null? exprs)
+      (error finish-body "lambda expression without body is prohibited"))
     (if (null? defns)
 	(map (cut expand <> env) exprs)
 	(let* ((defns (map clean-define defns))
@@ -320,9 +320,6 @@
 	(expand-syntax-rules1 form '... (cadr transformer)
 			      (cddr transformer) def-env use-env))))
 
-;;; used below to tag illegal pattern variables in ellipsis contexts
-(define bad-object (cons 'bad 'object))
-
 (define (expand-syntax-rules1 form ellipsis literals rules def-env use-env)
 
   ;; return a match list if FORM matches PATTERN, and #f otherwise.
@@ -351,10 +348,12 @@
 	    (unless (null? (cddr pattern))
 	      (error match-syntax "non-final ellipsis in pattern"))
 	    (and (list? form)
-		 (let ((matches (map (cut match-syntax <> (car pattern))
-				     form)))
-		   (and (every identity matches)
-			(assemble-ellipsed matches)))))
+		 (if (null? form)
+		     (null-ellipses (car pattern))
+		     (let ((matches  (map (cut match-syntax <> (car pattern))
+					  form)))
+		       (and (every identity matches)
+			    (assemble-ellipsed matches))))))
 	  (and (pair? form)
 	       (not (identifier? form))
 	       (let ((match-car (match-syntax (car form) (car pattern)))
@@ -365,6 +364,32 @@
      (else
       (error match-syntax "unsupported pattern"))))
 
+  ;; PATTERN is piece of a syntax pattern, which is being "matched"
+  ;; with ellipses against an empty list.  Generate a suitable
+  ;; empty spliced ellipses entry for a match list by scanning
+  ;; through it looking for the relevant identifiers.
+  (define (null-ellipses pattern)
+    (cond
+     ((identifier? pattern)
+      (unless (memq pattern literals)
+	(list (cons (list pattern) '()))))
+     ((null? pattern) '())
+     ((pair? pattern)
+      (if (and (pair? (cdr pattern))
+	       (eq? ellipsis (cadr pattern)))
+	  (begin
+	    (unless (null? (cddr pattern))
+	      (error null-ellipses "non-final ellipsis in pattern"))
+	    ;; inner ellipses get the same treatment, but one more
+	    ;; level of parens around each key.
+	    (let ((nested (null-ellipses (car pattern))))
+	      (map (lambda (p)
+		     (cons (list (car p)) (cdr p)))
+		   nested)))
+	  (append (null-ellipses (car pattern)) (null-ellipses (cdr pattern)))))
+     (else
+      (error null-ellipses "unsupported pattern"))))
+	
   ;; this works because toplevel EXPAND-SYNTAX is called at most once
   ;; inside an invocation of EXPAND-SYNTAX-RULES1.
   (define renamings '())
@@ -375,11 +400,7 @@
     (cond
      ((identifier? template)
       (cond
-       ((assq template pairing) 
-	=> (lambda (p)
-	     (when (eq? (cdr p) bad-object)
-	       (error expand-syntax "pattern variable with too few ellipses"))
-	     (cdr p)))
+       ((assq template pairing) => cdr)
        ;; A literal identifier is being inserted into the expansion.
        ;; Stick in an appropriate ***special-binding or use the one
        ;; we already have if this is a repeat.
@@ -398,15 +419,48 @@
 	  (begin
 	    (unless (null? (cddr template))
 	      (error expand-syntax "non-final ellipsis in template"))
-	    (let-values (((base splices) (destruct-ellipsed pairing)))
-	      (display (format "template ~a\n pairing ~a\n base ~a\n splices ~a\n" template pairing base splices))
-	      (map (lambda (newbies)
-		     (expand-syntax (car template) (append newbies base)))
-		   (splice-ellipsed splices))))
+	    (map (lambda (p) (expand-syntax (car template) p))
+		 (gather-ellipsed (find-ellipsed template) pairing)))
 	  (cons (expand-syntax (car template) pairing)
 		(expand-syntax (cdr template) pairing))))
 
      (else template)))
+  
+  ;; find the variables in TEMPLATE which ellipsis expansion should
+  ;; deal with and return a list of them, embedded in as many parens
+  ;; as they have ellipses after them in TEMPLATE.
+  (define (find-ellipsed template)
+    (cond
+     ((identifier? template)
+      (if (eq? ellipsis template)
+	  (error find-ellipsed "misplaced ellipsis in template")
+	  (list template)))
+     ((pair? template)
+      (if (and (pair? (cdr template))
+	       (eq? ellipsis (cadr template)))
+	  ;; wrap in parens in sub-ellipses
+	  (map (lambda (elt) (list elt))
+	       (find-ellipsed (car template)))
+	  (append (find-ellipsed (car template))
+		  (find-ellipsed (cdr template)))))
+     (else '())))
+
+  ;; VARS is a list of variables with parens indicating ellipsis depth.
+  ;; return a list of PAIRINGS for iteration across one ellipsis depth.
+  (define (gather-ellipsed vars pairing)
+    ;; return a new pairing with the parens reduced a level
+    (let ((new-pairing (filter-map (lambda (x) 
+				     (and (pair? (car x))
+					  (member (car x) vars)
+					  (cons (caar x) (cdr x))))
+				   pairing)))
+      (let ((vars (map car new-pairing))
+	    (vals (map cdr new-pairing)))
+	(apply map 
+	       (lambda val-set (map (lambda (var val) 
+				      (cons var val))
+				    vars val-set))
+	       vals))))
 
   (unless (identifier? ellipsis)
     (error expand-syntax-rules "bad ellipsis in syntax-rules"))
@@ -415,21 +469,15 @@
   (unless (list? rules)
     (error expand-syntax-rules "bad ruleset in syntax-rules"))
   
-  (display (format "expanding ~a\n" (pform form)))
   (let next ((rules rules))
     (when (null? rules)
       (error expand-syntax-rules "syntax match failure"))
     (unless (and (list? (car rules))
 		 (= (length (car rules)) 2))
       (error expand-syntax-rules "bad rule in syntax-rules"))
-    (display (format "trying ~a\n" (caar rules)))
     (let ((pairing (match-syntax (cdr form) (cdaar rules))))
       (if pairing
-	  (begin
-	    (display (format "template ~a\n" (pform (cadar rules))))
-	    (let ((x (expand-syntax (cadar rules) pairing)))
-	      (display (format "result ~a\n" (pform x)))
-	      x))
+	  (expand-syntax (cadar rules) pairing)
 	  (next (cdr rules))))))
 
 ;;; matches is a list of match lists.  Splice them together.
@@ -439,46 +487,6 @@
      (let ((key (car match-pair)))
        (cons (list key) (map (cut alist-ref key <> equal?) matches))))
    (car matches)))
-
-;;; destruct an ellipsed pairings assoc list; return two values
-;;; first the base list which will be the same for all the
-;;; things to do, and second, a list of pairings to append on, one
-;;; per invocation: a suitable argument for splice-ellipsed.
-(define (destruct-ellipsed pairings)
-  (if (null? pairings)
-      (values '() '())
-      (let-values (((base per) (destruct-ellipsed (cdr pairings))))
-	(let* ((this (car pairings))
-	       (key (car this))
-	       (val (cdr this)))
-	  (cond
-	   ((identifier? key)
-	    (values (cons (cons key bad-object) base)
-		    per))
-	   ((identifier? (car key))
-	    (values base 
-		    (cons (cons (car key) val) per)))
-	   (else
-	    (values (cons (cons (car key) val) base)
-		    per)))))))
-
-;;; splices is an alists.  Each value in it should be the same length.
-;;; Splice these into what we need to add to template assembly
-;;; pairings.
-;;; that is
-;;; example:
-;;; ((a . (1 2)) (b . (3 4)) (c . (5 6)) 
-;;;   => (((a . 1) (b . 3) (c . 5)) ((a . 2) (b . 4) (c . 6)))
-(define (splice-ellipsed splices)
-  (let ((names (map car splices))
-	(val-lists (map cdr splices)))
-    ;; names (a b c)
-    ;; val-lists ((1 2) (3 4) (5 6))
-    (apply map 
-	   ;; vals (1 3 5) and then (2 4 6)
-	   (lambda vals
-	     (map cons names vals))
-	   val-lists)))
 
 ;;; like write, but with special magic for identifiers (the problem is
 ;;; that if an id is special-bound to a syntax transformer, the
