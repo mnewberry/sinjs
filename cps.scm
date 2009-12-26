@@ -84,7 +84,7 @@
       (cps-transform (car forms) k)
       (let ((ignored (uniquify 'i)))
 	(cps-transform (car forms)
-		       `(lambda ,ignored 
+		       `(lambda (,ignored)
 			  ,(cps-transform-body (cdr forms) k))))))
 
 ;;; Apply CPS transformation to the elements of FORM, turning
