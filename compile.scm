@@ -9,7 +9,7 @@
 ;;; ((top-level-ref +) k arg1 arg2)
 ;;;   => (k ((INLINE +) arg1 arg2))
 ;;;
-(define inlinables '(+ * - zero?))
+(define inlinables '(+ * - zero? cons car cdr))
 
 (define (compile-form form)
 
@@ -22,6 +22,13 @@
       ((-) (string-append "(" (compile-1 (car args))
 			  ")-(" (compile-1 (cadr args)) ")"))
       ((zero?) (string-append "((" (compile-1 (car args)) ")===0)"))
+      ((cons) (string-append "(new Pair(("
+			     (compile-1 (car args))
+			     "),("
+			     (compile-1 (cadr args))
+			     ")))"))
+      ((car) (string-append "((" (compile-1 (car args)) ").car)"))
+      ((cdr) (string-append "((" (compile-1 (car args)) ").cdr)"))
       (else (error compile-inlining "bad inline procedure spec"))))
 
   (define (compile-formals formals)
@@ -38,6 +45,19 @@
      (else (string-append (compile-1 (car arguments)) ","
 			  (compile-arguments (cdr arguments))))))
 
+  (define (compile-literal datum)
+    (cond
+     ((number? datum) (number->string datum))
+     ((eq? datum #t) "true")
+     ((eq? datum #f) "false")
+     ((null? datum) "theNil")
+     ((pair? datum)
+      (string-append "new Pair(" (compile-literal (car datum)) ","
+		     (compile-literal (cdr datum)) ")"))
+     ((symbol? datum) (string-append "\"" (symbol->string datum) "\""))
+     (else (error (format "unsupported literal ~s\n" datum)))))
+
+
   (define (compile-1 form)
     (cond
    ;;; variables become JS variables [note, these are all locals]
@@ -52,12 +72,7 @@
 			  (compile-1 value) ")")))
 
 	((quote)
-	 (let ((literal (cadr form)))
-	   (cond
-	    ((number? literal) (number->string literal))
-	    ((eq? literal #t) "true")
-	    ((eq? literal #f) "false")
-	    (else (error (format "unsupported literal ~s\n" literal))))))
+	 (compile-literal (cadr form)))
 
 	((top-level-set!)
 	 (let ((variable (cadr form))
@@ -82,10 +97,16 @@
 	       (expression (caddr form)))
 	   (unless (null? (cdddr form))
 	     (error "implicit begin not supported in code generation\n"))
-	   (unless (list? formals)
-	     (error "rest arguments not supported yet\n"))
-	   (string-append "function (" (compile-formals formals) 
-			  "){return " (compile-1 expression) ";}")))
+	   (if (list? formals)
+	       (string-append "function (" (compile-formals formals) 
+			      "){return " (compile-1 expression) ";}")
+	       (let ((rest-var (take-right formals 0))
+		     (main-vars (drop-right formals 0)))
+		 (string-append "function (" (compile-formals main-vars) "){"
+				(symbol->string rest-var)
+				"=sinjs_restify(arguments,"
+				(number->string (length main-vars))
+				"); return " (compile-1 expression) ";}")))))
 
 	(else
 	 (cond

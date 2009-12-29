@@ -36,7 +36,7 @@
 	  ((define)
 	   ;; turn into a set! as per R5RS 5.2.1.
 	   (let ((d (clean-define form)))
-	     `(top-level-set! ,(cadr d) 
+	     `(top-level-set! ,(identifier->name (cadr d))
 			      ,(expand (caddr d) top-level-environment))))
 
 	  ((define-syntax)
@@ -88,7 +88,8 @@
 		    (find-modifications (caddr form))
 		    (find-modifications (cadddr form))))
       (else (append (find-modifications (car form))
-		    (find-modifications (cdr form))))))))
+		    (find-modifications (cdr form))))))
+   (else (error find-modifications (format "bad form ~a\n" form)))))
 					
 (define sinjs-prologue
   (string-append
@@ -96,6 +97,7 @@
    "var scheme_top_level = new Object();\n"
 ;   "scheme_top_level['+'] = function(k,a,b){return k(a+b);}\n"
 ;   "scheme_top_level['*'] = function(k,a,b){return k(a*b);}\n"
+   (read-all "runtime.js")
    ))
 
 (define sinjs-epilogue "")

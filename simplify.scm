@@ -66,6 +66,9 @@
 		  (list? (cadr procedure)) ;no rest parameter
 		  (= (length (cadr procedure)) (length args))
 		  (every reducable? args))
+	     #;(display (format "\nreducing ~s\n with ~s\n"
+			      (caddr procedure)
+			      (map cons (cadr procedure) args)))
 	     (beta-reduce (caddr procedure) 
 			  (map cons (cadr procedure) args)))
 	    
@@ -87,6 +90,7 @@
 
 (define (beta-reduce form mappings)
   (cond
+   ((eq? form inline-tag) form)
    ((assq form mappings) => cdr)
    ((symbol? form) form)
    ((pair? form)

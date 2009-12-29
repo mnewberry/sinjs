@@ -64,6 +64,20 @@
    ((pair? form) (caddr form))
    (else #f)))
 
+;;; tell whether OBJ is the toplevel id (in ENV) matching symbol SYM
+(define (top-level-id obj env sym)
+  (and (identifier? obj)
+       (not (identifier-rename obj env))
+       (eq? (identifier->name obj) sym)))
+
+;;; return a copy of FORM with all special identifiers cleaned out
+;;; (used for returning literals)
+(define (clean-ids form)
+  (cond
+   ((identifier? form) (identifier->name form))
+   ((pair? form) (cons (clean-ids (car form)) (clean-ids (cdr form))))
+   (else form)))
+
 ;;; here is the basic syntax walker
 (define (expand form env)
   ;;; this is what to do if we recognize a form as a combination.
@@ -107,7 +121,7 @@
        ;; dtrt, otherwise, it's a combination.
        (else
 	(case (identifier->name (car form))
-	  ((quote) form)		;nothing to do [don't expand inside!]
+	  ((quote) (clean-ids form))		;nothing to do
 
 	  ((set!)
 	   (let ((var (cadr form))
@@ -140,10 +154,12 @@
 	  ;; was in the macro, and not other uses of the same name
 	  ;; from the macro call's environment.
 	  ((lambda)
-	   (let ((bindings (map-formals (lambda (id)
-					  (cons id (uniquify
-						    (identifier->name id))))
-					(cadr form))))
+	   #;(display (format "lambda ~s\n" (pform form)))
+	   (let ((bindings (map-formals-flat (lambda (id)
+					       (cons id 
+						     (uniquify
+						      (identifier->name id))))
+					     (cadr form))))
 	     `(lambda ,(map-formals (lambda (id) (cdr (assq id bindings)))
 				    (cadr form))
 		,@(expand-body (cddr form) (append bindings env)))))
@@ -167,11 +183,12 @@
 					    (error expand 
 						   "bad let-syntax syntax"))
 					  (unless (and (pair? transformer)
-						       (eq? (car transformer)
-							    'syntax-rules))
+						       (top-level-id (car transformer) env
+								     'syntax-rules))
 					    (error expand 
-						   "bad let-syntax transformer"))
-					  `(,name . (,transformer . ,env))))
+						   (format "bad let-syntax transformer: ~a"
+							   (pform transformer))))
+					  `(,name . ((syntax-rules ,@(cdr transformer)) . ,env))))
 				      binding-list)
 				 env))))))
 
@@ -184,11 +201,10 @@
 				    (unless (identifier? name)
 				      (error expand "bad letrec-syntax syntax"))
 				    (unless (and (pair? transformer)
-						 (eq? (car transformer)
-						      'syntax-rules))
+						 (top-level-id (car transformer) env 'syntax-rules))
 				      (error expand 
 					     "bad letrec-syntax transformer"))
-				    `(,name . (,transformer . #f))))
+				    `(,name . ((syntax-rules ,@(cdr transformer)) . #f))))
 				binding-list))
 		  (new-env (append env-add env)))
 	     (for-each
@@ -202,22 +218,40 @@
 	  (else (combination)))))))
    (else (error expand "improper expression"))))
 
-;;; map across a lambda list.
+;;; map across a lambda list preserving dotted list structure
 (define (map-formals proc formals)
   (cond
    ((identifier? formals) (proc formals))
    ((null? formals) '())
-   ((pair? formals) (cons (proc (car formals)) 
-			  (map-formals proc (cdr formals))))
+   ((pair? formals) 
+    (if (not (identifier? (car formals)))
+	(error map-formals "bad lambda list")
+	(cons (proc (car formals)) 
+	      (map-formals proc (cdr formals)))))
    (else (error map-formals "bad lambda list"))))
+
+;;; map across a lambda list, turning dotted list into proper list structure
+(define (map-formals-flat proc formals)
+  (cond
+   ((identifier? formals) (list (proc formals)))
+   ((null? formals) '())
+   ((pair? formals) 
+    (if (not (identifier? (car formals)))
+	(error map-formals-flat "bad lambda list")
+	(cons (proc (car formals))
+	      (map-formals-flat proc (cdr formals)))))
+   (else (error map-formals-flat "bad lambda list"))))
+
 
 ;;; expand all first-level syntax in a form, but leave the rest alone.
 (define (expand-first-syntax form env)
+  #;(display (format "efs ~s\n" (pform form)))
   (if (or (identifier? form) 
 	  (not (pair? form))
 	  (not (identifier? (car form))))
       form
       (let ((starter (identifier-rename (car form) env)))
+	#;(display (format "starter ~s\n" (pform starter)))
 	(cond
 	 ((or (symbol? starter) (not starter)) form)
 	 ((and (pair? (car starter))
@@ -260,24 +294,23 @@
     (if (null? forms) 
 	(finish-body defns forms)
 	(let ((primo (expand-first-syntax (car forms) env)))
-	  (if (and (pair? primo)	;list syntax
-		   (identifier? (car primo)) ;begins with identifier
-		   (not (identifier-rename (car primo) env)) ;not locally bound
-		   (or (eq? (identifier->name (car primo))
-			    'define) ;and is a definition
-		       (eq? (identifier->name (car primo))
-			    'begin))) ;or might be
-	      (if (eq? (identifier->name (car primo)) 'begin)
-		  ;; splice
-		  (expand-body1 (append (cdr primo) forms) defns)
-		  ;; a definition
-		  (expand-body1 (cdr forms) (cons primo defns)))
+	  (if (pair? primo)
+	      (cond
+	       ((top-level-id (car primo) env 'define)
+		(expand-body1 (cdr forms) (cons primo defns)))
+	       ((top-level-id (car primo) env 'begin)
+		(expand-body1 (append (cdr primo) (cdr forms)) defns))
+	       (else (finish-body defns forms)))
 	      (finish-body defns forms)))))
 
   ;; if there are definitions, turn them into an implicit letrec-type
   ;; construct and expand that. note that we are careful to make sure
   ;; the LAMBDA and SET! we insert have their top-level bindings since
   ;; they are passed to EXPAND.
+  ;; xxx
+  ;; note that this has a bug: the variables are not assigned all
+  ;; at once, after the values have been determined, as they should be.
+  ;; xxx
   (define (finish-body defns exprs)
     (when (null? exprs)
       (error finish-body "lambda expression without body is prohibited"))
@@ -374,10 +407,12 @@
   ;; empty spliced ellipses entry for a match list by scanning
   ;; through it looking for the relevant identifiers.
   (define (null-ellipses pattern)
+    #;(display (format "null ellipses on ~s\n" (pform pattern)))
     (cond
      ((identifier? pattern)
-      (unless (memq pattern literals)
-	(list `(,pattern 1 ()))))
+      (if (memq pattern literals)
+	  '()
+	  (list `(,pattern 1 . ()))))
      ((null? pattern) '())
      ((pair? pattern)
       (if (and (pair? (cdr pattern))
@@ -387,9 +422,9 @@
 	      (error null-ellipses "non-final ellipsis in pattern"))
 	    ;; inner ellipses get the same treatment, but one more
 	    ;; level of parens around each key.
-	    (map inc-depth (null-ellipses (car pattern)))
-	    (append (null-ellipses (car pattern))
-		    (null-ellipses (cdr pattern))))))
+	    (map inc-depth (null-ellipses (car pattern))))
+	  (append (null-ellipses (car pattern))
+		  (null-ellipses (cdr pattern)))))
      (else
       (error null-ellipses "unsupported pattern"))))
 	
@@ -432,7 +467,7 @@
 	      (error expand-syntax "non-final ellipsis in template"))
 	    (map (lambda (p) (expand-syntax (car template) p))
 		 (let ((g (gather-ellipsed (find-ellipsed template) pairing)))
-		   (display (format "  as ~s\n" g))
+		   #;(display (format "  as ~s\n" g))
 		   g)))
 	  (cons (expand-syntax (car template) pairing)
 		(expand-syntax (cdr template) pairing))))
@@ -471,18 +506,18 @@
 	   (error gather-ellipsed "incorrect number of ellipses in pattern"))))
      vars)
 
-    (display (format "  gathering ~s with ~s\n" vars pairing))
+    #;(display (format "  gathering ~s with ~s\n" vars pairing))
     ;; return a new pairing with the depth reduced a level, and only
     ;; including variables in VARS.
     (let ((new-pairing (filter-map (lambda (elt) 
 				     (and (assq (car elt) vars)
 					  (dec-depth elt)))
 				   pairing)))
-      (display (format "   new pairing ~s\n" new-pairing))
+      #;(display (format "   new pairing ~s\n" new-pairing))
       (let ((vars (map car new-pairing))
 	    (depths (map cadr new-pairing))
 	    (vals (map cddr new-pairing)))
-	(display (format "   vars ~s depths ~s vals ~s\n" vars depths vals))
+	#;(display (format "   vars ~s depths ~s vals ~s\n" vars depths vals))
 	(unless (apply = (map length vals))
 	  (error gather-ellipsed
 		 "lists not of equal length in ellipsis expansion"))
@@ -503,23 +538,25 @@
   
   (let next ((rules rules))
     (when (null? rules)
-      (error expand-syntax-rules "syntax match failure"))
+      (error expand-syntax-rules (format "syntax match failure: ~a" 
+					 (pform form))))
     (unless (and (list? (car rules))
 		 (= (length (car rules)) 2))
       (error expand-syntax-rules "bad rule in syntax-rules"))
     (let ((pairing (match-syntax (cdr form) (cdaar rules))))
       (if pairing
 	  (begin
-	    (display (format "expanding ~s\nwith pattern~s\n"
-			     form (caar rules)))
-	    (display (format "inside template ~s\n" (cadar rules)))
+	    #;(display (format "expanding ~s\nwith pattern~s\n"
+			     (pform form) (pform (caar rules))))
+	    #;(display (format "inside template ~s\n" (pform (cadar rules))))
 	    (let ((x (expand-syntax (cadar rules) pairing)))
-	      (display (format "producing ~s\n" x))
+	      #;(display (format "producing ~s\n" (pform x)))
 	      x))
 	  (next (cdr rules))))))
 
 ;;; matches is a list of match lists.  Splice them together.
 (define (assemble-ellipsed matches)
+  #;(display (format "assembling ~s\n" matches))
   (map
    (lambda (elt)
      `(,(car elt) ,(+ 1 (cadr elt))
