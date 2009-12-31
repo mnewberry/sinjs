@@ -51,7 +51,7 @@
   (syntax-rules ()
     ((_) #f)
     ((_ x) x)
-    ((_ x y ...) (let ((tmp x)) if tmp tmp (or y ...)))))
+    ((_ x y ...) (let ((tmp x)) (if tmp tmp (or y ...))))))
 
 ;;; R5RS 4.2.2 and 4.2.4
 
@@ -96,11 +96,11 @@
 	     (loop (last var step ...) ...)))))))
 
 ;;; 4.2.5
-;;; The R5RS sample implementation requires an auxiliary procedure which
-;;; we'd like to avoid; if you put the procedure into the syntax-rules then
-;;; users of promise get forced inlining.  So instead, we capture the 
-;;; expression here in a cons (FORCED . proc/val), and all the rest
-;;; of the work is in FORCE.
+;;; The R5RS sample implementation requires an auxiliary procedure
+;;; which we'd like to avoid; if you put the procedure into the
+;;; syntax-rules then users of promise get forced inlining of a big
+;;; procedure.  So instead, we capture the expression here in a cons
+;;; (FORCED . proc/val), and all the rest of the work is in FORCE.
 (define-syntax delay
   (syntax-rules ()
     ((_ expr) (cons #f (lambda () expr)))))
@@ -144,9 +144,6 @@
 ;;; The system then does the right thing to turn this alist into
 ;;; top level bindings.
 ;;;
-
-       
-
 
 
 ;;;
@@ -199,18 +196,14 @@
 
 ;;;
 ;;; Builtin are the following procedures:
-;;;
-;;; number? < > <= >= + * - / abs quotient remainder modulo
-;;; gcd lcm numerator denominator floor ceiling truncate round
-;;; rationalize exp log sin cos tan asin acos atan sqrt expt
+;;;   number? < > <= >= + * - / abs remainder
+;;;   floor ceiling
+;;;   exp log sin cos tan asin acos atan sqrt expt
+;;;   number->string string->number
 
 ;;; The following are not provided, in accord with the permission
 ;;; of R5RS to omit them if we don't support general complex numbers:
-;;; 
-;;; make-rectangular make-polar real-part imag-part magnitude angle
-
-;;; XXX Not yet implemented: number->string string->number
-
+;;;   make-rectangular make-polar real-part imag-part magnitude angle
 
 (define complex? number?)
 (define real? number?)
@@ -221,9 +214,6 @@
 
 (define (exact? z) #f)
 (define (inexact? z) #t)
-
-;;; for now, this is correct
-(define = eq?)
 
 (define (zero? z)
   (= n 0))
@@ -250,6 +240,99 @@
 	  (apply min z1 (cdr zs))
 	  (apply min zs))))
 
+;;; JS has no builtin integer division!
+(define (quotient n1 n2)
+  (/ (- n1 (remainder n1 n2)) n2))
+
+(define (modulo n1 n2)
+  (let ((r (remainder n1 n2)))
+    (cond
+     ((and (negative? n2) (positive? r))
+      (- r n2))
+     ((and (positive? n2) (negative? r))
+      (+ r n2))
+     (else r))))
+
+(define (gcd . ns)
+  (define (gcd* a b)
+    (if (zero? b)
+	(abs a)
+	(gcd* b (remainder a b))))
+  (let next ((ns ns) (g 0))
+    (if (null? ns)
+	g
+	(next (cdr ns) (gcd* g (car ns))))))
+
+(define (lcm . ns)
+  (define (lcm* a b)
+    (* (/ (abs a) (gcd a b)) (abs b)))
+  (let next ((ns ns) (m 1))
+    (if (null? ns)
+	m
+	(next (cdr ns) (lcm* g (car ns))))))
+
+(define (denominator q)
+  ;; assume we're dealing with binary floating point
+  ;; and search for the right denominator.
+  (if (integer? q)
+      1
+      (let next-ub-guess ((ub 1))
+	(if (integer? (* q ub))
+	    (let next-search ((lb 1)
+			      (ub ub))
+	      ;; binary search for the minimal denominator
+	      ;; invariant: LB is too small; UB is (maybe) too big
+	      (if (= ub (+ lb 1))
+		  ub
+		  (let ((midpoint (if (even? (- ub lb))
+				      (+ lb (/ (- ub lb) 2))
+				      (+ lb (/ (- ub lb) 2) -0.15))))
+		    (if (integer? (* q midpoint))
+			(next-search lb midpoint)
+			(next-search midpoint ub)))))
+	    (next-ub-guess (* ub 2))))))
+
+(define (numerator q)
+  (* (denominator q) q))
+
+(define (truncate x)
+  (cond
+   ((positive? x) (floor x))
+   ((negative? x) (ceiling x))
+   (else x)))
+
+;;; note that it is not clear if JS's Math.round is guaranteed
+;;; to round even on midpoints.
+(define (round x)
+  (let ((diff (- x (floor x))))
+    (cond
+     ((< diff 0.5) (floor x))
+     ((> diff 0.5) (ceiling x))
+     ((even? (floor x)) (floor x))
+     (else (ceiling x)))))
+
+;;; Thanks to Alan Bawden.  This is snarfed from the MIT/GNU Scheme source.
+(define (rationalize x e)
+  (define (loop x y)
+    (let ((fx (floor x))
+	  (fy (floor y)))
+      (cond ((not (< fx x)) fx)
+	    ((= fx fy)
+	     (+ fx
+		(/ 1
+		   (loop (/ 1 (- y fy))
+			 (/ 1 (- x fx))))))
+	    (else (+ fx 1)))))
+
+  (define (find-it x y)
+    (cond ((positive? x) (loop x y))
+	  ((negative? y) (- (loop (- y) (- x))))
+	  (else 0)))
+  (cond
+   ((positive? e) (find-it (- x e) (+ x e)))
+   ((negative? e) (find-it (+ x e) (- x e)))
+   (else x)))
+
 (define (exact->inexact z) z)
 (define (inexact->exact z) z)
 
@@ -257,16 +340,11 @@
 ;;; PROCEDURES (other data types)  
 ;;;
 ;;; Builtin are:
-;;;
-;;; pair? cons car cdr set-car! set-cdr!
-;;; symbol? symbol->string string->symbol 
-;;; char? char->integer integer->char
-;;; string? make-string string-length string-ref string-set!
-;;; vector? make-vector vector-length vector-ref vector-set!
-
-;;; Not yet defined are:
-;;; char-alphabetic? char-numeric? char-whitespace? 
-;;; char-upper-case? char-lower-case? char-upcase char-downcase
+;;;   pair? cons car cdr set-car! set-cdr!
+;;;   symbol? symbol->string string->symbol 
+;;;   char? char->integer integer->char
+;;;   string? make-string string-length string-ref string-set!
+;;;   vector? make-vector vector-length vector-ref vector-set!
 
 (define (boolean? obj)
   (or (eq? obj #t)
@@ -395,6 +473,40 @@
 (char-compare char-ci<=? char<=? char-upcase)
 (char-compare char-ci>=? char>=? char-upcase)
 
+(define (char-alphabetic? c)
+  (or (char-upper-case? c)
+      (char-lower-case? c)))
+
+(define (char-numeric? c)
+  (let ((n (char->integer c)))
+    (and (>= n 48) (<= n 57))))
+
+(define (char-whitespace? c)
+  (let ((n (char->integer c)))
+    (or (= n 32)			;space
+	(= n 9)				;tab
+	(= n 10)			;linefeed
+	(= n 12)			;formfeed
+	(= n 13))))			;carriage return
+
+(define (char-upper-case? c)
+  (let ((n (char->integer c)))
+    (and (>= n 65) (<= n 90))))
+
+(define (char-lower-case? c)
+  (let ((n (char->integer c)))
+    (and (>= n 97) (<= n 122))))
+  
+(define (char-upcase c)
+  (if (char-lower-case? c)
+      (integer->char (- (char->integer c) 32))
+      c))
+
+(define (char-downcase c)
+  (if (char-upper-case? c)
+      (integer->char (+ (char->integer c) 32))
+      c))
+
 ;; this is bad, given that string-set! is so slow given
 ;; the immutability of JS strings.
 (define (string . chars)
@@ -522,8 +634,8 @@
 ;;; PROCEDURES (control features)
 ;;;
 ;;; Builtin are:
-;;; procedure? apply call-with-current-continuation call-with-values
-;;; dynamic-wind
+;;;   procedure? apply call-with-current-continuation call-with-values
+;;;   dynamic-wind
 
 (define (map proc list . lists)
   (if (null? lists)
@@ -570,13 +682,246 @@
 
 ;;; INPUT AND OUTPUT
 ;;;
-;;; Not implemented:
-;;; call-with-input-file call-with-output-file input-port? output-port?
-;;; current-input-port current-output-port 
-;;; with-input-from-file with-output-to-file open-input-file open-output-file
-;;; close-input-port close-output-port
-;;; read read-char peek-char eof-object? char-ready?
-;;; write display newline write-char
+;;; Builtin are
+;;;   open-input-file open-output-file close-input-port close-output-port
+;;;   input-port? output-port?
+;;;   current-input-port current-output-port [with an arg, sets it, returns old]
+;;;   read-char peek-char eof-object? char-ready? write-char
+;;;
+(define (call-with-input-file str proc)
+  (let ((p (open-input-file str)))
+    (proc p)
+    (close-input-port p)))
+
+(define (call-with-output-file str proc)
+  (let ((p (open-output-file str)))
+    (proc p)
+    (close-output-port p)))
+
+(define (port? p)
+  (or (input-port? p)
+      (output-port? p)))
+
+(define (with-input-from-file str proc)
+  (call-with-input-file str (lambda (p)
+			      (let ((old (current-input-port p)))
+				(proc)
+				(current-input-port old)))))
+
+(define (with-output-to-file str proc)
+  (call-with-output-file str (lambda (p)
+			       (let ((old (current-output-port p)))
+				 (proc)
+				 (current-output-port old)))))
+
+(define (read . port*)
+  (let ((port (if (null? port*) (current-input-port) (car port*))))
+    (define gathered #f)
+    (define delimiters '(#\( #\) #\" #\' #\` #\,
+			 #\; #\space #\tab #\newline #\page #\return))
+    (define (read*)
+      (if gathered
+	  (let ((c (peek-char port)))
+	    (if (memv c delimiters)
+		(let ((tok (parse-long-token gathered)))
+		  (set! gathered #f)
+		  tok)
+		(begin
+		  (set! gathered 
+			(string-append gathered 
+				       (string (char-downcase 
+						(read-char port)))))
+		  (read*))))
+	  (let ((c (read-char port)))
+	    (case c
+	      ((#\() (read-list #t))
+	      ((#\)) (error read "unexpected list terminator"))
+	      ((#\") (read-string))
+	      ((#\') (list 'quote (read*)))
+	      ((#\`) (list 'quasiquote (read*)))
+	      ((#\,) (if (eqv? (peek-char port) #\@)
+			 (begin (read-char port)
+				(list 'unquote-splicing (read*)))
+			 (list 'unquote (read*))))
+	      ((#\#)
+	       (case (char-downcase (read-char port))
+		 ((#\t) #t)
+		 ((#\f) #f)
+		 ((#\() (list->vector (read-list #f)))
+		 ((#\\) (let ((c (read-char port)))
+			  (if (char-alphabetic? c)
+			      (begin (set! gathered  (string-append "#\\" c))
+				     (read*))
+			      (parse-long-token (string-append "#\\" c)))))
+		 ((#\i) (set! gathered "#i") (read*))
+		 ((#\e) (set! gathered "#e") (read*))
+		 ((#\b) (set! gathered "#b") (read*))
+		 ((#\o) (set! gathered "#o") (read*))
+		 ((#\d) (set! gathered "#d") (read*))
+		 ((#\x) (set! gathered "#x") (read*))
+		 (else (error read "impromper # syntax"))))
+	      ((#\space #\newline #\page #\tab #\return) (read*))
+	      ((#\;) (skip-comment) (read*))
+	      (else
+	       (if (or (char-alphabetic? c)
+		       (char-numeric? c)
+		       (memv c '(#\! #\$ #\% #\& #\* #\/ #\: #\< #\=
+				 #\> #\? #\^ #\_ #\~ #\+ #\- #\. #\@)))
+		   (begin (set! gathered (string (char-downcase c)))
+			  (read*))
+		   (error read 
+			  (string-append "unexpected character '" c "'"))))))))
+
+    ;; peek char, but skip white space on the way
+    (define (skip-white-peek)
+      (let ((c (peek-char port)))
+	(cond
+	 ((memv c (#\space #\tab #\newline #\page #\return))
+	  (read-char port) 
+	  (skip-white-peek))
+	 ((char=? c #\;)
+	  (skip-comment)
+	  (skip-white-peek))
+	 (else c))))
+    
+    (define (skip-comment)
+      (if (not (char=? (read-char port) #\newline))
+	  (skip-comment)))
+
+    (define (read-list allow-improper-list)
+      (if (char=? (skip-white-peek) #\))
+	  (begin (read-char port) '())
+	  (let ((a (read*)))
+	    ;; dotted lists are a pain!
+	    (if (char=? (skip-white-peek) #\.)
+		(begin (read-char port)
+		       (if (memv (peek-char port) delimiters)
+			   ;; legitimate dot
+			   (begin (if (not allow-improper-list)
+				      (error read "invalid vector syntax"))
+				  (read-char port) ;consume delimiter
+				  (let ((b (read*)))
+				    (skip-white-peek)
+				    (if (not (char=? (read-char port) #\)))
+					(error read "missing list terminator"))
+				    (cons a b)))
+			   ;; not really a dot, keep trying
+			   (begin (set! gathered ".")
+				  (cons a (read-list allow-improper-list)))))
+		(cons a (read-list allow-improper-list))))))
+
+    ;; parse a long token, defined specifically as a number, identifier,
+    ;; or character.
+    (define (parse-long-token str)
+      (if (and (char=? (string-ref str 0) #\#)
+	       (char=? (string-ref str 1) #\\))
+	  (cond
+	   ((string-ci=? str "#\\newline") #\newline)
+	   ((string-ci=? str "#\\space") #\space)
+	   ((string-ci=? str "#\\return") #\return)
+	   ((string-ci=? str "#\\page") #\page)
+	   ((string-ci=? str "#\\tab") #\tab)
+	   (else (if (> (string-length str) 3)
+		     (error read
+			    (string-append "invalid character syntax " str))
+		     (string-ref str 2))))
+	  (or (string->number str)
+	      (string->symbol str))))
+
+    (define (read-string)
+      (let ((str ""))
+	(let more ((c (read-char port)))
+	  (case c
+	    ((#\\) 
+	     (set! str (string-append str (string (read-char port))))
+	     (more))
+	    ((#\") str)
+	    (else (set! str (string-append str c))
+		  (more))))))
+
+    (read*)))
+
+(define (write obj . port*)
+  (let ((port (if (null? port*) (current-output-port) (car port*))))
+    (define (write-slashify str)
+      (write-char #\" port)
+      (let ((len (string-length str)))
+	(do ((i 0 (+ i 1)))
+	    ((>= i len))
+	  (if (or (char=? (string-ref str i) #\")
+		  (char=? (string-ref str i) #\\))
+	      (write-char #\\ port))
+	  (write-char (string-ref str i) port)))
+      (write-char #\" port))
+
+    (define (write-rest tail)
+      (cond
+       ((null? tail) (write-char #\) port))
+       ((pair? tail)
+	(write-char #\space port)
+	(write (car tail) port)
+	(write-rest (cdr tail)))
+       (else (display " . " port)
+	     (write (cdr tail) port)
+	     (write-char #\) port))))
+
+    (cond
+     ((eq? obj #t) (display "#t" port))
+     ((eq? obj #f) (display "#f" port))
+     ((symbol? obj) (display (symbol->string obj) port))
+     ((char? obj) (display (case obj
+			     ((#\newline) "#\\newline")
+			     ((#\return) "#\\return")
+			     ((#\page) "#\\page")
+			     ((#\tab) "#\\tab")
+			     ((#\space) "#\\space")
+			     (else (string #\# #\\ obj)))))
+     ((vector? obj) (write-char #\# port) (write (vector->list obj) port))
+     ((pair? obj) 
+      (write-char #\( port)
+      (write (car obj) port) 
+      (write-rest (cdr obj)))
+     ((null? obj) (display "()" port))
+     ((number? obj) (display (number->string obj) port))
+     ((string? obj) (slashify-string obj))
+     ((procedure? obj) (display "#<procedure>" port))
+     ((eof-object? obj) (display "#<eof>" port))
+     ((port? obj) (display "#<port>" port)))))
+
+(define (display obj . port*)
+  (let ((port (if (null? port) (current-output-port) (car port))))
+    (define (display-rest tail)
+      (cond
+       ((null? tail) (write-char #\) port))
+       ((pair? tail)
+	(write-char #\space port)
+	(display (car tail) port)
+	(display-rest (cdr tail)))
+       (else (display " . " port)
+	     (display (cdr tail) port)
+	     (write-char #\) port))))
+
+    (cond
+     ((eq? obj #t) (display "#t" port))
+     ((eq? obj #f) (display "#f" port))
+     ((symbol? obj) (display (symbol->string obj) port))
+     ((char? obj) (write-char obj port))
+     ((vector? obj) (write-char #\# port) (display (vector->list obj) port))
+     ((pair? obj) (write-char #\( port)
+                  (display (car obj) port) 
+                  (display-rest (cdr obj)))
+     ((null? obj) (display "()" port))
+     ((number? obj) (display (number->string obj) port))
+     ((string? obj) (let ((len (string-length (obj))))
+		      (do ((i 0 (+ i 1)))
+			  ((>= i len))
+			(write-char (string-ref obj i)))))
+     ((procedure? obj) (display "#<procedure>" port))
+     ((eof-object? obj) (display "#<eof>" port))
+     ((port? obj) (display "#<port>" port)))))
+
+(define (newline . port*)
+  (write-char #\newline (if (null? port) (current-output-port) (car port))))
 
 ;;; SYSTEM INTERFACE
 ;;;
