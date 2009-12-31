@@ -77,12 +77,12 @@
 	((top-level-set!)
 	 (let ((variable (cadr form))
 	       (value (caddr form)))
-	   (string-append "scheme_top_level['" (symbol->string variable)
+	   (string-append "top_level_binding['" (symbol->string variable)
 			  "']=(" (compile-1 value) ")")))
 
 	((top-level-ref)
 	 (let ((variable (cadr form)))
-	   (string-append "scheme_top_level['" (symbol->string variable) "']")))
+	   (string-append "top_level_binding['" (symbol->string variable) "']")))
 	
 	((if)
 	 (let ((test (cadr form))
