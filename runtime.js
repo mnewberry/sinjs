@@ -51,11 +51,12 @@ function top_level_run (n) {
     (scheme_top_level_table[n])(function (ignored){top_level_run(n+1);});
 }
 
+
 function scheme_top_level() {
     try {
 	top_level_run(0);
     } catch (e) {
-	if (e.name === "sinjs return to top level") {
+	if (e.name === "SINJSreturn") {
 	    return e.value;
 	} else { 
 	    throw e;
@@ -64,13 +65,83 @@ function scheme_top_level() {
 }
 
 function scheme_top_level_done () {
-    throw { name: "sinjs return to top level", 
+    throw { name: "SINJSreturn", 
 	    value: "sinjs-top-level-undefined" };
 }
 
 //
 // Builtin procedures
 //
+
+// helper functions
+function check_number(a) {
+    if (typeof(a) !== "number")
+	throw { name: "SINJStypeerror",
+		message: a + " is not a number" };
+}
+
+function check_integer(a) {
+    if ((typeof(a) !== "number") || (a !== Math.floor(a)))
+	throw { name: "SINJStypeerror",
+		message: a + " is not an integer" };
+}
+
+function check_pair(a) {
+    if (obj.constructor !== Pair)
+	throw { name: "SINJStypeerror",
+		message: a + " is not a pair" };
+}
+
+function check_symbol(a) {
+    if (typeof(obj) !== "string")
+	throw { name: "SINJStypeerror",
+		message: a + " is not a symbol" };
+}
+
+function check_string(a) {
+    if (obj.constructor !== SchemeString)
+	throw { name: "SINJStypeerror",
+		message: a + " is not a string" };
+}
+
+function check_string_and_len (a, n) {
+    check_string (a);
+    if (a.length >= n)
+	throw { name: "SINJSlengtherror",
+		message: n + " is out of bounds for access to " + a};
+}
+
+function check_char(a) {
+    if (obj.constructor !== SchemeChar)
+	throw { name: "SINJStypeerror",
+		message: a + " is not a char" };
+}
+
+function check_vector (a) {
+    if (obj.constructor !== Array) 
+	throw { name: "SINJStypeerror",
+		message: a + " is not a vector" };
+}
+
+function check_vector_and_len (a, n) {
+    check_vector (a);
+    if (a.length >= n)
+	throw { name: "SINJSlengtherror",
+		message: n + " is out of bounds for access to " + a};
+}	
+
+function check_procedure (a) {
+    if (typeof(a) !== "function")
+	throw { name: "SINJStypeerror",
+		message: a + " is not a procedure" };
+}
+
+function check_pair_or_null (a) {
+    if ((obj.constructor !== Pair) && (obj !== theNil))
+	throw { name: "SINJStypeerror",
+		message: a + " is not a list" };
+}
+
 
 // R5RS 6.1
 top_level_binding['eq?'] = function (k, a, b) {
