@@ -52,12 +52,20 @@ function top_level_run (n) {
 }
 
 function scheme_top_level() {
-    // catch exception here
-    top_level_run(0);
+    try {
+	top_level_run(0);
+    } catch (e) {
+	if (e.name === "sinjs return to top level") {
+	    return e.value;
+	} else { 
+	    throw e;
+	}
+    }
 }
 
 function scheme_top_level_done () {
-    // throw exception here
+    throw { name: "sinjs return to top level", 
+	    value: "sinjs-top-level-undefined" };
 }
 
 //
