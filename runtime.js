@@ -22,6 +22,22 @@ function intern_char(c) {
     return interned_chars[c];
 };
 
+// ports
+function SchemeInputPort(readfn, peekfn, readyfn, closefn) {
+    this.readfn = readfn;
+    this.peekfn = peekfn;
+    this.readyfn = readyfn;
+    this.closefn = closefn;
+};
+
+function SchemeOutputPort(writefn, closefn) {
+    this.writefn = writefn;
+    this.closefn = closefn;
+};
+
+function EOF () {};
+var theEOF = new EOF ();
+
 // multiple values are boxed as a list thus.
 function MultipleValues(val) {
     this.val = val;
@@ -40,25 +56,61 @@ function sinjs_restify(vec,n) {
     return l;
 }
 
+// top level variables
 var top_level_binding = new Object();
 
-// top level support
+// stack management
+//
+// current stack depth
+var sinjs_stack_depth;
+
+// *rough* maximum stack depth
+var sinjs_stack_max = 30;
+
+// call PROC as the top of a sinjs stack.  A sinjs stack is
+// really just a stack, but frames never return.
+// When we have made a bunch of stack frames, we eventually throw
+// a SINJSrestartstack exception, which simply continues here.  If
+// we get #f as a restart procedure, we return the VAL member of the
+// exception.
+function sinjs_start_stack(proc) {
+    var e = { restart: proc };
+    while (true) {
+	try {
+	    sinjs_stack_depth = 0;
+	    proc ();
+	} catch (newe) {
+	    if (newe.name === "SINJSrestartstack") {
+		if (newe.proc === false) {
+		    return newe.val;
+		}
+		else {
+		    e = newe;
+		}
+	    } else {
+		throw newe;
+	    };
+	};
+    };
+};
+
+// top level execution
 // used as a continuation for storing top-level procedures in the array
+// of top-level forms to execute.
 function top_level_return (value){return value;};
 
 // execute the Nth top-level procedure and proceed to the N+1th after.
 function top_level_run (n) {
-    (scheme_top_level_table[n])(function (ignored){top_level_run(n+1);});
+    (scheme_top_level_table[n])(function (){top_level_run(n+1);});
 }
-
 
 function scheme_top_level() {
     try {
-	top_level_run(0);
+	sinjs_start_stack (function () {top_level_run(0)};);
     } catch (e) {
 	if (e.name === "SINJSreturn") {
 	    return e.value;
-	} else { 
+	} else {
 	    throw e;
 	}
     }
@@ -140,6 +192,18 @@ function check_pair_or_null (a) {
     if ((obj.constructor !== Pair) && (obj !== theNil))
 	throw { name: "SINJStypeerror",
 		message: a + " is not a list" };
+}
+
+function check_input_port (a) {
+    if (obj.constructor !== SchemeInputPort)
+	throw { name: "SINJStypeerror",
+		message: a + " is not an input port" };
+}
+
+function check_output_port (a) {
+    if (obj.constructor !== SchemeOutputPort)
+	throw { name: "SINJStypeerror",
+		message: a + " is not an output port" };
 }
 
 
@@ -419,6 +483,7 @@ top_level_binding['vector-set!'] = function (k, vector, n, obj) {
 top_level_binding['procedure?'] = function (k, obj) {
     return k(typeof(obj) === 'function');
 };
+sinjs_apply = 
 top_level_binding['apply'] = function (k, proc) {
     var args = [], i, p;
     check_procedure (proc)
@@ -464,4 +529,98 @@ top_level_binding['call-with-values'] = function (k, producer, consumer) {
 		return consumer(k, ret);
 	    }
 	})
+};
+
+// R5RS 6.6
+//
+// not implemented here (must be in platform-specific code):
+//   open-input-file open-output-file
+//
+// magical global vars, must be initialized in platform-specific code.
+var sinjs_current_input_port, sinjs_current_output_port;
+top_level_binding['input-port?'] = function (k, obj) {
+    return k(obj.constructor===SchemeInputPort);
+};
+top_level_binding['output-port?'] = function (k, obj) {
+    return k(obj.constructor===SchemeOutputPort);
+};
+top_level_binding['current-input-port'] = function (k) {
+    var pt = sinjs_current_input_port;
+    if (arguments.length > 1) {
+	check_input_port (arguments[1]);
+	sinjs_current_input_port = arguments[1];
+    };
+    return k(pt);
+};
+top_level_binding['current-output-port'] = function (k) {
+    var pt = sinjs_current_output_port;
+    if (arguments.length > 1) {
+	check_output_port (arguments[1]);
+	sinjs_current_output_port = arguments[1];
+    };
+    return k(pt);
+};
+top_level_binding['close-input-port'] = function (k, port) {
+    var close;
+    check_input_port (port);
+    close = port.closefn;
+    if (close !== false) {
+	port.closefn = false;
+	(port.closefn)(port);
+    };
+    return k("close-input-port undefined value");
+};
+top_level_binding['close-output-port'] = function (k, port) {
+    var close;
+    check_output_port (port);
+    close = port.closefn;
+    if (close !== false) {
+	port.closefn = false;
+	(port.closefn)(port);
+    };
+    return k("close-output-port undefined value");
+};
+top_level_binding['read-char'] = function (k) {
+    var port;
+    if (arguments.length > 1) {
+	port = arguments[1];
+    } else {
+	port = sinjs_current_input_port;
+    };
+    check_input_port (port);
+    return k(port.readfn(port));
+};
+top_level_binding['peek-char'] = function (k) {
+    var port;
+    if (arguments.length > 1) {
+	port = arguments[1];
+    } else {
+	port = sinjs_current_input_port;
+    };
+    check_input_port (port);
+    return k(port.peekfn(port));
+};
+top_level_binding['eof-object?'] = function (k, obj) {
+    return k(obj === theEOF);
+};
+top_level_binding['char-ready?'] = function (k) {
+    var port;
+    if (arguments.length > 1) {
+	port = arguments[1];
+    } else {
+	port = sinjs_current_input_port;
+    };
+    check_input_port (port);
+    return k(port.readyfn(port));
+};
+top_level_binding['write-char'] = function (k, c) {
+    var port;
+    check_char (c);
+    if (arguments.length > 1) {
+	port = arguments[1];
+    } else {
+	port = sinjs_current_output_port;
+    };
+    check_output_port (port);
+    return k(port.writefn(port, c));
 };
