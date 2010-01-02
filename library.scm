@@ -101,12 +101,15 @@
 ;;; syntax-rules then users of promise get forced inlining of a big
 ;;; procedure.  So instead, we capture the expression here in a cons
 ;;; (FORCED . proc/val), and all the rest of the work is in FORCE.
+;;;
+;;; Requires CONS
 (define-syntax delay
   (syntax-rules ()
     ((_ expr) (cons #f (lambda () expr)))))
 
 ;;; 4.2.6
 ;;; xxx tracks depth with secret extra arguments that users could screw with
+;;; Requires APPEND LIST CONS LIST->VECTOR 
 (define-syntax quasiquote
   (syntax-rules (unquote unquote-splicing quasiquote)
     ;; basic top-level unquoting rules
@@ -139,11 +142,14 @@
 ;;; R5RS guarantees that standard procedures continue to function correctly
 ;;; even if others have been assigned.  We guarantee this by requiring
 ;;; any procedure used by another standard procedure to be either inlined,
-;;; or specially dealt with.
+;;; or specially dealt with.  Each procedure below is documented with the
+;;; procedures it calls (as well as the syntax DELAY and QUASIQUOTE above).
+
+;;; All builtin procedures are also inlined unless specially mentioned.
 
 ;;; PROCEDURES (equivalence)
 ;;;
-;;; EQ? is builtin.
+;;; Builtin: eq?
 
 ;;; Requires EQ? CHAR? CHAR=? NUMBER? =
 (define (eqv? a b)
@@ -197,10 +203,14 @@
 ;;;   floor ceiling
 ;;;   exp log sin cos tan asin acos atan sqrt expt
 ;;;   number->string string->number
-
 ;;; The following are not provided, in accord with the permission
 ;;; of R5RS to omit them if we don't support general complex numbers:
 ;;;   make-rectangular make-polar real-part imag-part magnitude angle
+
+;;; Also inlined:
+;;;   number? complex? real? rational? integer? exact? inexact?  zero?
+;;;   positive? negative? odd? even? exact->inexact? inexact->exact?
+
 
 (define complex? number?)
 (define real? number?)
@@ -365,6 +375,15 @@
 ;;;
 ;;; For efficiency's sake:
 ;;;   substring string-append
+;;;
+;;; Inlined are also:
+;;;   boolean? not c*r null? list? list length
+;;;   char=? char<? char>? char<=? char>=? 
+;;;   char-ci=? char-ci<? char-ci>? char-ci<=? char-ci>=?
+;;;   char-alphabetic? char-numeric? char-whitespace? 
+;;;   char-upper-case? char-lower-case? char-upcase char-downcase
+;;;   string=?
+
 
 ;;; Requires EQ?
 (define (boolean? obj)
@@ -609,7 +628,29 @@
 
 ;;; Requires STRING-LENGTH = - CONS STRING-REF
 (define (string->list s)
-  (let ((len (string-length + = STRING-SET!
+  (let ((len (string-len s)))
+    (let next-char ((i len)
+		    (lis '()))
+      (if (= len 0)
+	  lis
+	  (next-char (- i 1) (cons (string-ref s (- i 1)) lis))))))
+
+;;; Requires LENGTH MAKE-STRING = STRING-SET! CAR + CDR
+(define (list->string lis)
+  (let* ((len (length lis))
+	 (s (make-string len)))
+    (let next-char ((i 0)
+		    (lis lis))
+      (if (= i len)
+	  s
+	  (begin (string-set! s i (car lis))
+		 (next-char (+ i 1) (cdr lis)))))))
+
+;;; Requires SUBSTRING STRING-LENGTH
+(define (string-copy s)
+  (substring s 0 (string-length s)))
+
+;;;Requires STRING-LENGTH + = STRING-SET!
 (define (string-fill! s c)
   (let ((len (string-length s)))
     (do ((i 0 (+ i 1)))
