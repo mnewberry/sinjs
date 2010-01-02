@@ -28,13 +28,14 @@
 
 ;;; compile top-level forms into a Javascript program.
 (define (top-level-compile-forms forms)
-  (let* ((prepared-forms (map-values prepare forms))
-	 (unsafes (find-modifications prepared-forms)))
-    (string-append (sinjs-prologue)
-		   (make-top-level-table
-		    (map (cut top-level-compile <> unsafes) 
-			 prepared-forms))
-		   (sinjs-epilogue))))
+  (let ((prepared-forms (map-values prepare forms)))
+    (let-values (((global-set!s local-set!s)
+		  (find-modifications prepared-forms)))
+      (string-append (sinjs-prologue)
+		     (make-top-level-table
+		      (map (cut top-level-compile <> global-set!s local-set!s) 
+			   prepared-forms))
+		     (sinjs-epilogue)))))
 
 ;;; expand syntax first, check for top-level keywords, wrap
 ;;; in a procedure, and do a full expansion.
@@ -71,10 +72,22 @@
 ;;; argument.  Since FORM is a lamba expression, this means the
 ;;; return of TOP-LEVEL-COMPILE is a JS code fragment which 
 ;;; evaluates to a procedure.
-(define (top-level-compile form unsafes)
+#;(define (top-level-compile form unsafes)
   (let ((continuation 'top_level_return))
-    (string-append 
-     (compile-form (simplify (cps-transform form continuation) unsafes)))))
+    (compile-form (simplify (cps-transform form continuation) unsafes))))
+
+;;; while simplification does introduce variables, it never renames
+;;; or introduces set! or top-level-set!, so the list of assignments
+;;; from the preparation step is ok.
+(define (top-level-compile form global-set!s local-set!s)
+  (let* ((continuation 'top_level_return)
+	 (transformed (cps-transform form continuation))
+	 (simplified (simplify transformed global-set!s local-set!s))
+	 (compiled (compile-form simplified)))
+    (display (format "start form ~a\n" form))
+    (display (format "after CPS ~a\n" transformed))
+    (display (format "after simp ~a\n" simplified))
+    compiled))
 
 ;;; Take a series of strings, each which evaluates to a JS function,
 ;;; and generate JS code that puts them in a table.
@@ -90,7 +103,7 @@
 	    (map (lambda (var) (string-append (symbol->string var) ",\n")) 
 		 tablevars))
      
-     "scheme_top_level_done()"
+     "scheme_top_level_done"
      "];")))
 
 ;;; return a list of top-level variables bound by the specified forms
@@ -105,28 +118,37 @@
    (else (find-bindings (cdr forms)))))
 
 ;;; works on a list of forms, or a single form, because
-;;; of the rule for combinations.
+;;; of the rule for combinations.  return two values:
+;;; first, list of targets of top-level-set!, second, list
+;;; of targets of set!.
 (define (find-modifications form)
+  (define (empty) (values '() '()))
   (cond
-   ((null? form) '())
-   ((symbol? form) '())
+   ((null? form) (empty))
+   ((symbol? form) (empty))
    ((pair? form)
     (case (car form)
-      ((quote top-level-ref) '())
-      ((set!) (find-modifications (caddr form)))
+      ((quote top-level-ref) (empty))
+      ((set!) (let-values (((global local)
+			    (find-modifications (caddr form))))
+		(values global (cons (cadr form) local))))
       ((begin) (find-modifications (cdr form)))
       ((lambda) (find-modifications (cddr form)))
-      ((top-level-set!) (cons (cadr form) ;the important one!
-			      (find-modifications (caddr form))))
-      ((if) (append (find-modifications (cadr form))
-		    (find-modifications (caddr form))
-		    (find-modifications (cadddr form))))
-      (else (append (find-modifications (car form))
-		    (find-modifications (cdr form))))))
+      ((top-level-set!) (let-values (((global local)
+				      (find-modifications (caddr form))))
+			  (values (cons (cadr form) global) local)))
+      ((if) (let-values (((global1 local1) (find-modifications (cadr form)))
+			 ((global2 local2) (find-modifications (caddr form)))
+			 ((global3 local3) (find-modifications (cadddr form))))
+	      (values (append global1 global2 global3)
+		      (append local1 local2 local3))))
+      (else (let-values (((global1 local1) (find-modifications (car form)))
+			 ((global2 local2) (find-modifications (cdr form))))
+	      (values (append global1 global2) (append local1 local2))))))
    (else (error find-modifications (format "bad form ~a\n" form)))))
 					
 (define (sinjs-prologue)
-  (read-all "runtime.js"))
+  ""
+  #;(read-all "runtime.js"))
 
 (define (sinjs-epilogue) "")
-

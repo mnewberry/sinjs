@@ -6,19 +6,28 @@
 ;;; a new expression type which codegen uses to emit those calls.
 (define inline-tag (cons 'inlinable 'tag))
 
-;;; We can beta reduce these argument types
-(define (reducable? form)
-  (or (symbol? form)
-      (and (pair? form)
-	   (let ((head (car form)))
-	     (or (memq head '(quote top-level-ref lambda))
-		 (and (pair? head)
-		      (eq? (car head) inline-tag)))))))
-
-(define (simplify form unsafes)
+(define (simplify form global-set!s local-set!s)
   (define (inline-ok? name)
     (and (memq name inlinables)
-	 (not (memq name unsafes))))
+	 (not (memq name global-set!s))))
+
+  ;; We are considering beta-reducing EXPR; check if ACTUAL is an
+  ;; acceptable actual parameter when expanded into FORMAL.
+  (define (reducable? actual formal expr)
+    #;(display (format "  checking reduction of ~s ~s ~s\n" actual formal expr))
+    (or (and (pair? actual)		;constants
+	     (or (eq? (car actual) 'quote)
+		 (eq? (car actual) 'lambda))
+	     (not (memq formal local-set!s)))
+	(and (symbol? actual)	;actual is unassigned local var
+	     (not (memq actual local-set!s))
+	     (not (memq formal local-set!s)))
+	(and (pair? actual)		;actual is unassigned global var
+	     (eq? (car actual) 'top-level-ref)
+	     (not (memq (cadr actual) global-set!s))
+	     (not (memq formal local-set!s)))
+	(and (not (setwithin? actual expr)) ;formal is not captured
+	     (not (captured? formal expr)))))
 
   (define (simplify-1 form)
     (cond
@@ -59,15 +68,16 @@
 	    ((and (eq? procedure inline-tag))
 	     form)
 
-	    ;; If all the arguments to the procedure are reducable,
-	    ;; then do a beta reduction
+	    ;; if the operator position is a literal procedure, perhaps
+	    ;; we can do a beta reduction.
 	    ((and (list? procedure)
 		  (eq? (car procedure) 'lambda)
 		  (list? (cadr procedure)) ;no rest parameter
-		  (= (length (cadr procedure)) (length args))
-		  (every reducable? args))
-	     #;(display (format "\nreducing ~s\n with ~s\n"
-			      (caddr procedure)
+		  (= (length (cadr procedure)) (length args)) ;correct # of args
+		  (every (cut reducable? <> <> (caddr procedure))
+			 args (cadr procedure)))
+	     #;(display (format "form ~s\n" form))
+	     #;(display (format "reducing with ~s\n\n"
 			      (map cons (cadr procedure) args)))
 	     (beta-reduce (caddr procedure) 
 			  (map cons (cadr procedure) args)))
@@ -85,9 +95,93 @@
   (let ((f (simplify-1 form)))
     (if (equal? f form)
 	form
-	(simplify f unsafes))))
+	(simplify f global-set!s local-set!s))))
 
+;;; We can beta reduce if every argument fits any of the following tests:
+;;;   Actual parm is any constant (QUOTE or LAMBDA)
+;;;   Actual parm is a variable which is never assigned in the program
+;;;   Actual parm is a variable which is somewhere assigned, but
+;;;       formal parm is not captured within the body of the procedure
+;;;       being reduced, and the actual parm is not assigned within 
+;;;	  the body of the procedure assigned.
+;;; 
+;;;   In addition, the formal parm must never be assigned.
 
+;;; Define a "saved lambda" as a lambda which is being used other than
+;;; in operator position.  A variable is used in a saved lambda if it
+;;; occurs (at any depth or nesting or sub-lambda) within it.
+
+;;; A variable is captured, then, if it is used in a saved lambda.
+;;; Such variables cannot be beta reduced because (since they are set
+;;; somewhere), the value may be different between the lookup at the
+;;; call we are reducing, and the use later inside the saved lambda.
+;;; If a variable is set within the procedure being reduced, but with
+;;; no captures, we could in principle still beta-reduce it, but that would
+;;; require a flow control analysis we don't care to deal with here, so
+;;; we skip that possibility.
+
+;;; In addition, we leave the call alone if the procedure uses a rest
+;;; parameter, or there is an argument count mismatch.
+;;;
+;;; All these rules are implemented by the functions below, and above
+;;; in the body of SIMPLIFY.
+
+;; return true if SYMBOL is captured by a lambda in EXPR, which means
+;; that we must preserve it (and not beta reduce) because it is the
+;; value at EXPR evaluation time which must be preserved.
+;;
+;; also return true if SYMBOL is assigned anywhere in EXPR.
+(define (captured? symbol expr)
+  (cond
+   ((eq? expr inline-tag) #f)
+   ((symbol? expr) #f)
+   ((pair? expr)
+    (case (car expr)
+      ((quote) #f)
+      ((set!) (or (eq? symbol (cadr expr))
+		  (captured? symbol (caddr expr))))
+      ((if) (or (captured? symbol (cadr expr))
+		(captured? symbol (caddr expr))
+		(captured? symbol (cadddr expr))))
+      ((lambda) (used? symbol (caddr expr))) ;this is a lambda to check...
+      ;; note here that we do not need to check operator position
+      (else (any (cut captured? symbol <>) (cdr expr)))))))
+
+;;; return true if SYMBOL is used or assigned anywhere in EXPR
+(define (used? symbol expr)
+  (cond
+   ((eq? expr inline-tag) #f)
+   ((and (symbol? expr)
+	 (eq? symbol expr)) #t)
+   ((pair? expr)
+    (case (car expr)
+      ((quote) #f)
+      ((set!) (or (eq? symbol (cadr expr))
+		  (used? symbol (caddr expr))))
+      ((if) (or (used? symbol (cadr expr))
+		(used? symbol (caddr expr))
+		(used? symbol (cadddr expr))))
+      ((lambda) (used? symbol (caddr expr)))
+      ;; here we *do* check operator position of course
+      (else (any (cut used? symbol <>) expr))))))
+  
+;; is VAR set within EXPR?    
+(define (setwithin? var expr)
+  (cond
+   ((eq? expr inline-tag) #f)
+   ((symbol? expr) #f)
+   ((pair? expr)
+    (case (car expr)
+      ((quote) #f)
+      ((set!) (or (eq? var (cadr expr))
+		  (setwithin? var (caddr expr))))
+      ((if (or (setwithin? var (cadr expr))
+	       (setwithin? var (caddr expr))
+	       (setwithin? var (cadddr expr)))))
+      ((lambda) (setwithin? var (caddr expr)))
+      (else (any (cut setwithin? var <>) expr))))))
+
+;;; Actually reduce FORM with variable->value pairs in the alist MAPPINGS
 (define (beta-reduce form mappings)
   (cond
    ((eq? form inline-tag) form)
@@ -106,7 +200,6 @@
       ((lambda)
        (let ((formals (cadr form))
 	     (value (caddr form)))
-	 ;; note that this depends on the uniquification of variables
 	 `(lambda ,formals ,(beta-reduce value mappings))))
 
       (else
