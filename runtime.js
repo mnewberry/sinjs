@@ -368,6 +368,20 @@ top_level_binding['string-set!'] = function (k, string, n, c) {
     string.val = string.val.slice(0,n) + c + string.val.slice(n+1);
     return k("string-set! undefined value");
 };
+top_level_binding['substring'] = function (k, string, start, end) {
+    check_integer(start);
+    check_integer(end);
+    check_string_and_len (string, end - 1);
+    return k(string.substring(start,end));
+}
+top_level_binding['string-append'] = function (k) {
+    var s = "", i;
+    for (i = 1; i < arguments.length; i += 1) {
+	check_string (arguments[i]);
+	s = s + arguments[i];
+    }
+    return k(s);
+};
 
 // 6.3.6 Scheme vectors are just JS arrays [from class Array]
 top_level_binding['vector?'] = function (k, obj) {

@@ -133,7 +133,6 @@
     ;; anything else is just quoted, whatever the depth
     ((_ anything tail ...) (quote anything))))
 
-
 ;;;
 ;;; Procedure definitions
 ;;;
@@ -144,7 +143,6 @@
 ;;; The system then does the right thing to turn this alist into
 ;;; top level bindings.
 ;;;
-
 
 ;;;
 ;;; PROCEDURES (equivalence)
@@ -227,18 +225,20 @@
   (= 0 (remainder n 2)))
 
 (define (max z1 . zs)
-  (if (null? zs)
-      z1
-      (if (> z1 (car zs))
-	  (apply max z1 (cdr zs))
-	  (apply max zs))))
+  (let loop ((l zs)
+	     (top z1))
+    (cond
+     ((null? l) top)
+     ((> (car l) top) (loop (cdr l) (car l)))
+     (else (loop (cdr l) top)))))
 
 (define (min z1 . zs)
-  (if (null? zs)
-      z1
-      (if (< z1 (car zs))
-	  (apply min z1 (cdr zs))
-	  (apply min zs))))
+  (let loop ((l zs)
+	     (bottom z1))
+    (cond
+     ((null? l) top)
+     ((< (car l) top) (loop (cdr l) (car l)))
+     (else (loop (cdr l) bottom)))))
 
 ;;; JS has no builtin integer division!
 (define (quotient n1 n2)
@@ -345,6 +345,9 @@
 ;;;   char? char->integer integer->char
 ;;;   string? make-string string-length string-ref string-set!
 ;;;   vector? make-vector vector-length vector-ref vector-set!
+;;;
+;;; For efficiency's sake:
+;;;   substring string-append
 
 (define (boolean? obj)
   (or (eq? obj #t)
@@ -557,27 +560,6 @@
 (string-compare string-ci>? > char-ci>? char-ci=?)
 (string-compare string-ci<=? <= char-ci<=? char-ci=?)
 (string-compare string-ci>=? >= char-ci>=? char-ci=?)
-
-(define (substring s start end)
-  (let ((news (make-string (- end start))))
-    (do ((i start (+ i 1))
-	 (j 0 (+ j 1)))
-	((= i end) news)
-      (string-set! news j (string-ref s i)))))
-
-(define (string-append . strings)
-  (let ((s (make-string (apply + (map string-len strings)))))
-    (let next-string ((i 0)
-		      (strings strings))
-      (if (null? strings)
-	  s
-	  (next-string
-	   (+ i (let* ((this-string (car strings))
-		       (this-len (string-len this-string)))
-		  (do ((j 0 (+ j 1)))
-		      ((= j len) len)
-		    (string-set! s i (string-ref this-string j)))))
-	   (cdr strings))))))
 
 (define (string->list s)
   (let ((len (string-len s)))
