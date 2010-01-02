@@ -372,15 +372,15 @@ top_level_binding['substring'] = function (k, string, start, end) {
     check_integer(start);
     check_integer(end);
     check_string_and_len (string, end - 1);
-    return k(string.substring(start,end));
+    return k(new SchemeString (string.val.substring(start,end)));
 }
 top_level_binding['string-append'] = function (k) {
     var s = "", i;
     for (i = 1; i < arguments.length; i += 1) {
 	check_string (arguments[i]);
-	s = s + arguments[i];
+	s = s + arguments[i].val;
     }
-    return k(s);
+    return k(new SchemeString(s));
 };
 
 // 6.3.6 Scheme vectors are just JS arrays [from class Array]
