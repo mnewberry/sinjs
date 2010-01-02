@@ -403,15 +403,18 @@
       (+ 1 (length (cdr list)))))
 
 (define (append . lists)
-  (cond
-   ((null? lists) '())
-   ((null? (car lists)) (apply append (cdr lists)))
-   (else (cons (caar lists) (apply append (cdar lists) (cdr lists))))))
+  (let append* (lists lists)
+    (cond
+     ((null? lists) '())
+     ((null? (car lists)) (append* (cdr lists)))
+     (else (cons (caar lists) (append* (cons (cdar lists) (cdr lists))))))))
 
-(define (reverse lyst)
-  (if (null? lyst)
-      '()
-      (append (reverse lyst) (list (car lyst)))))
+(define (reverse list)
+  (let next ((list list) 
+	     (so-far '()))
+    (if (null? lyst)
+	so-far
+	(next (cdr list) (cons (car list) so-far)))))
 
 (define (list-tail list k)
   (if (zero? k)
