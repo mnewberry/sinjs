@@ -444,15 +444,16 @@ top_level_binding['call-with-current-continuation'] = function (k, proc) {
     // procedures, which take an extra k (ignored in this case).
     return proc(k, 
 		(function (kont) {
-		    kont = nil;	// in case some GC is looking at it?
+		    kont = false;	// in case some GC is looking at it?
 		    if (arguments.length != 2)
 			return k(new MultipleValues
 				 (sinjs_restify(arguments, 1)));
 		    else
-			return arguments[1];
+			return k(arguments[1]);
 		}));
 };
 
+// XXX use of top level APPLY here is subject to stray set!.
 top_level_binding['call-with-values'] = function (k, producer, consumer) {
     check_procedure (producer);
     check_procedure (consumer);
