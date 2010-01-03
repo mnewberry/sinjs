@@ -147,10 +147,9 @@ function sinjs_repl_k(fun) {
     sinjs_repl_execute(function () {fun(sinjs_repl_print_answer);});
 };
 function sinjs_repl_print_answer(answer) {
-    print (answer + "\n");
+    rhino_write(answer);
     scheme_top_level_done ();
 };
-
 
 //
 // Builtin procedures
