@@ -12,11 +12,11 @@
 
 (define (csi-rhino-repl)
   (call-with-output-pipe 
-    "js /dev/stdin"
+    "js rhino-evaller.js"
     (lambda (js-connector)
       (define (send-out str)
-	(display str)
-	(newline)
+	#;(display str)
+	#;(newline)
 	(display str js-connector)
 	(newline js-connector)
 	(flush-output js-connector))
@@ -34,5 +34,6 @@
 			      (find-modifications (list transformed))))
 		  (let ((compiled (compile-form (simplify transformed
 							  #f l-set!s))))
-		    (send-out compiled)
+		    (send-out (string-append compiled ";"))
+		    (sleep 1)
 		    (repl))))))))))
