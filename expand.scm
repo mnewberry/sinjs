@@ -333,7 +333,7 @@
 			  ,@(make-list (length vars)
 				       '(quote implicit-letrec-undefined-value)))))
 	    #;(display (format "result: ~s\n" (pform result)))
-	    (expand result env)))))
+	    (list (expand result env))))))
 
   #;(display (format "\nbody: ~s\n" (map pform forms)))
   (expand-body1 forms '()))
