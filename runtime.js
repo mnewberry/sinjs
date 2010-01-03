@@ -129,8 +129,10 @@ function sinjs_repl_execute(fun) {
     } catch (e) {
 	if (e.name === "SINJSreturn") {
 	    return e.value;
-	} else
-	    throw e;
+	} else {
+	    print ("sinjs exception [" + e.name + "]: " + e.message);
+	    return false;
+	}
     };
 };
 
