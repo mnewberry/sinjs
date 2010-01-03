@@ -84,9 +84,9 @@
 	 (transformed (cps-transform form continuation))
 	 (simplified (simplify transformed global-set!s local-set!s))
 	 (compiled (compile-form simplified)))
-    (display (format "start form ~a\n" form))
-    (display (format "after CPS ~a\n" transformed))
-    (display (format "after simp ~a\n" simplified))
+    #;(display (format "start form ~a\n" form))
+    #;(display (format "after CPS ~a\n" transformed))
+    #;(display (format "after simp ~a\n" simplified))
     compiled))
 
 ;;; Take a series of strings, each which evaluates to a JS function,
@@ -148,7 +148,6 @@
    (else (error find-modifications (format "bad form ~a\n" form)))))
 					
 (define (sinjs-prologue)
-  ""
-  #;(read-all "runtime.js"))
+  (read-all "runtime.js"))
 
 (define (sinjs-epilogue) "")
