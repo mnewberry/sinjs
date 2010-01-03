@@ -6,10 +6,19 @@
 ;;; a new expression type which codegen uses to emit those calls.
 (define inline-tag (cons 'inlinable 'tag))
 
+;;; if global-set!s is #f, then make no assumptions about global
+;;; assignments.
 (define (simplify form global-set!s local-set!s)
+  (define (local-set? name)
+    (memq name local-set!s))
+
+  (define (global-set? name)
+    (or (not global-set!s)
+	(memq name global-set!s)))
+
   (define (inline-ok? name)
     (and (memq name inlinables)
-	 (not (memq name global-set!s))))
+	 (not (global-set? name))))
 
   ;; We are considering beta-reducing EXPR; check if ACTUAL is an
   ;; acceptable actual parameter when expanded into FORMAL.
@@ -20,14 +29,19 @@
 		 (eq? (car actual) 'lambda))
 	     (not (memq formal local-set!s)))
 	(and (symbol? actual)	;actual is unassigned local var
-	     (not (memq actual local-set!s))
-	     (not (memq formal local-set!s)))
+	     (not (local-set? actual))
+	     (not (local-set? formal)))
 	(and (pair? actual)		;actual is unassigned global var
 	     (eq? (car actual) 'top-level-ref)
-	     (not (memq (cadr actual) global-set!s))
+	     (not (global-set? (cadr actual))))
 	     (not (memq formal local-set!s)))
-	(and (not (setwithin? actual expr)) ;formal is not captured
-	     (not (captured? formal expr)))))
+	(and (symbol? actual)
+	     (not (setwithin? actual expr)) ;formal is not captured
+	     (not (captured? formal expr)))
+	(and (pair? actual)
+	     (eq? (car actual) 'top-level-ref)
+	     (not (setwithin? (cadr actual) expr))
+	     (not (captured? formal expr))))
 
   (define (simplify-1 form)
     (cond
@@ -140,6 +154,9 @@
       ((quote) #f)
       ((set!) (or (eq? symbol (cadr expr))
 		  (captured? symbol (caddr expr))))
+      ((top-level-ref) #f)
+      ((top-level-set!) (or (eq? symbol (cadr expr))
+			    (captured? symbol (caddr expr))))
       ((if) (or (captured? symbol (cadr expr))
 		(captured? symbol (caddr expr))
 		(captured? symbol (cadddr expr))))
@@ -158,6 +175,9 @@
       ((quote) #f)
       ((set!) (or (eq? symbol (cadr expr))
 		  (used? symbol (caddr expr))))
+      ((top-level-ref) (eq? symbol (cadr expr)))
+      ((top-level-set!) (or (eq? symbol (cadr expr))
+			    (used? symbol (caddr expr))))
       ((if) (or (used? symbol (cadr expr))
 		(used? symbol (caddr expr))
 		(used? symbol (cadddr expr))))
@@ -165,7 +185,7 @@
       ;; here we *do* check operator position of course
       (else (any (cut used? symbol <>) expr))))))
   
-;; is VAR set within EXPR?    
+;; is VAR set within EXPR?
 (define (setwithin? var expr)
   (cond
    ((eq? expr inline-tag) #f)
@@ -173,8 +193,11 @@
    ((pair? expr)
     (case (car expr)
       ((quote) #f)
+      ((top-level-ref) #f)
       ((set!) (or (eq? var (cadr expr))
 		  (setwithin? var (caddr expr))))
+      ((top-level-set!) (or (eq? var (cadr expr))
+			    (setwithin? var (caddr expr))))
       ((if (or (setwithin? var (cadr expr))
 	       (setwithin? var (caddr expr))
 	       (setwithin? var (cadddr expr)))))
@@ -193,7 +216,10 @@
       ((set!) (if (assq (cadr form) mappings)
 		  (error "set! in beta reduction")
 		  `(set! ,(cadr form) 
-			 (beta-reduce (caddr form) mappings))))
+			 ,(beta-reduce (caddr form) mappings))))
+      ((top-level-set!) `(top-level-set! 
+			  ,(cadr form)
+			  ,(beta-reduce (caddr form) mappings)))
       ((if) `(if ,(beta-reduce (cadr form) mappings)
 		 ,(beta-reduce (caddr form) mappings)
 		 ,(beta-reduce (cadddr form) mappings)))
