@@ -148,6 +148,7 @@
    (else (error find-modifications (format "bad form ~a\n" form)))))
 					
 (define (sinjs-prologue)
+;  "")
   (read-all "runtime.js"))
 
 (define (sinjs-epilogue) "")
