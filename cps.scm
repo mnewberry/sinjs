@@ -68,7 +68,7 @@
 
       ((lambda) (let ((formals (cadr form))
 		      (forms (cddr form))
-		      (kvar (uniquify 'l)))
+		      (kvar (uniquify 'k)))
 		  `(,k (lambda ,(cons kvar formals)
 			 ,(cps-transform-body forms kvar)))))
 
@@ -91,11 +91,10 @@
 ;;; them into the specified series of temporaries in a curry-ish fashion.
 ;;; Then drop END into the middle once all the temps are expanded.
 (define (cps-transform-combination combo temps end)
-  (if (null? (cdr combo))
-      (cps-transform (car combo)
-		     `(lambda ,temps ,end))
-      (cps-transform (car combo)
-		     `(lambda (,(car temps))
-			,(cps-transform-combination (cdr combo) (cdr temps)
+  (cps-transform (car combo)
+		 `(lambda (,(car temps))
+		    ,(if (null? (cdr combo))
+			 end
+			 (cps-transform-combination (cdr combo)
+						    (cdr temps)
 						    end)))))
-       
