@@ -226,13 +226,13 @@
 
 ;;; Requires =
 (define (zero? z)
-  (= n 0))
+  (= z 0))
 ;;; Requires >
 (define (positive? x)
-  (> n 0))
+  (> x 0))
 ;;; Requires <
 (define (negative? x)
-  (< n 0))
+  (< x 0))
 ;;; Requires = REMAINDER
 (define (odd? n)
   (= 1 (remainder n 2)))
@@ -254,8 +254,8 @@
   (let loop ((l zs)
 	     (bottom z1))
     (cond
-     ((null? l) top)
-     ((< (car l) top) (loop (cdr l) (car l)))
+     ((null? l) bottom)
+     ((< (car l) bottom) (loop (cdr l) (car l)))
      (else (loop (cdr l) bottom)))))
 
 ;;; JS has no builtin integer division!
@@ -291,7 +291,7 @@
   (let next ((ns ns) (m 1))
     (if (null? ns)
 	m
-	(next (cdr ns) (lcm* g (car ns))))))
+	(next (cdr ns) (lcm* m (car ns))))))
 
 ;;; Requires INTEGER? * = + EVEN? - /
 (define (denominator q)
@@ -455,7 +455,7 @@
 (define (reverse list)
   (let next ((list list) 
 	     (so-far '()))
-    (if (null? lyst)
+    (if (null? list)
 	so-far
 	(next (cdr list) (cons (car list) so-far)))))
 
@@ -612,8 +612,8 @@
 		 (lentest? len1 len2)
 		 (or (chartest? (string-ref string1 i)
 				(string-ref string2 i))
-		     (and (chareqtest? (string-ref string1 i))
-			  (chareqtest? (string-ref string2 i))
+		     (and (chareqtest? (string-ref string1 i)
+				       (string-ref string2 i))
 			  (next (+ i 1))))))))))))
 
 ;;; Each requires the three specified procs, and = STRING-REF +
