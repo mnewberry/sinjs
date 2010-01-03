@@ -150,6 +150,9 @@ function sinjs_repl_print_answer(answer) {
     rhino_write(answer);
     scheme_top_level_done ();
 };
+function sinjs_repl_noprint_k(fun) {
+    sinjs_repl_execute(function () {fun(scheme_top_level_done);});
+};
 
 //
 // Builtin procedures
@@ -281,7 +284,7 @@ top_level_binding['+'] = function (k) {
 };
 top_level_binding['*'] = function (k) {
     var total = 1, i;
-    for (i = arguments.length - 1; i >= 1; i -= i) {
+    for (i = arguments.length - 1; i >= 1; i -= 1) {
 	check_number (arguments[i]);
 	total = total * arguments[i];
     }
@@ -290,7 +293,7 @@ top_level_binding['*'] = function (k) {
 top_level_binding['-'] = function (k, first) {
     var total, i;
     check_number (first);
-    if (arguments.length = 2) {
+    if (arguments.length === 2) {
 	return k(- first);
     } else {
 	total = first;
@@ -304,8 +307,8 @@ top_level_binding['-'] = function (k, first) {
 top_level_binding['/'] = function (k, first) {
     var total, i;
     check_number (first);
-    if (arguments.length = 2) {
-	return (1 / first);
+    if (arguments.length === 2) {
+	return k(1 / first);
     } else {
 	total = first;
 	for (i = arguments.length - 1; i >= 2; i -= 1) {
@@ -540,7 +543,7 @@ top_level_binding['call-with-current-continuation'] = function (k, proc) {
     return proc(k, 
 		(function (kont) {
 		    kont = false;	// in case some GC is looking at it?
-		    if (arguments.length != 2)
+		    if (arguments.length !== 2)
 			return k(new MultipleValues
 				 (sinjs_restify(arguments, 1)));
 		    else
@@ -650,8 +653,8 @@ top_level_binding['char-ready?'] = function (k) {
 top_level_binding['write-char'] = function (k, c) {
     var port;
     check_char (c);
-    if (arguments.length > 1) {
-	port = arguments[1];
+    if (arguments.length > 2) {
+	port = arguments[2];
     } else {
 	port = sinjs_current_output_port;
     };
