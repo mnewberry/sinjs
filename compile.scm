@@ -9,8 +9,8 @@
 ;;; ((top-level-ref +) k arg1 arg2)
 ;;;   => (k ((INLINE +) arg1 arg2))
 ;;;
-(define inlinables '(+ * - zero? cons car cdr))
-
+;(define inlinables '(+ * - zero? cons car cdr))
+(define inlinables '())
 (define (compile-form form)
 
   (define (compile-inlining procedure args)
@@ -55,6 +55,8 @@
       (string-append "new Pair(" (compile-literal (car datum)) ","
 		     (compile-literal (cdr datum)) ")"))
      ((symbol? datum) (string-append "\"" (symbol->string datum) "\""))
+     ((string? datum) 
+      (string-append "new SchemeString (\"" datum "\")"))
      (else (error (format "unsupported literal ~s\n" datum)))))
 
 
