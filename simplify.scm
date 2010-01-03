@@ -23,25 +23,24 @@
   ;; We are considering beta-reducing EXPR; check if ACTUAL is an
   ;; acceptable actual parameter when expanded into FORMAL.
   (define (reducable? actual formal expr)
-    #;(display (format "  checking reduction of ~s ~s ~s\n" actual formal expr))
     (or (and (pair? actual)		;constants
 	     (or (eq? (car actual) 'quote)
 		 (eq? (car actual) 'lambda))
-	     (not (memq formal local-set!s)))
+	     (not (local-set? formal)))
 	(and (symbol? actual)	;actual is unassigned local var
 	     (not (local-set? actual))
 	     (not (local-set? formal)))
 	(and (pair? actual)		;actual is unassigned global var
 	     (eq? (car actual) 'top-level-ref)
-	     (not (global-set? (cadr actual))))
-	     (not (memq formal local-set!s)))
+	     (not (global-set? (cadr actual)))
+	     (not (local-set? formal)))
 	(and (symbol? actual)
 	     (not (setwithin? actual expr)) ;formal is not captured
 	     (not (captured? formal expr)))
 	(and (pair? actual)
 	     (eq? (car actual) 'top-level-ref)
 	     (not (setwithin? (cadr actual) expr))
-	     (not (captured? formal expr))))
+	     (not (captured? formal expr)))))
 
   (define (simplify-1 form)
     (cond
