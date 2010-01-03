@@ -2,6 +2,7 @@
 
 (use (srfi 1))
 
+
 ;;; an inlinable is a procedure which codegen can compile into direct
 ;;; JS syntax.
 ;;; Simplification is responsible for inserting these:
@@ -34,8 +35,8 @@
   (define (compile-formals formals)
     (cond
      ((null? formals) "")
-     ((null? (cdr formals)) (symbol->string (car formals)))
-     (else (string-append (symbol->string (car formals)) "," 
+     ((null? (cdr formals)) (compile-identifier (car formals)))
+     (else (string-append (compile-identifier (car formals)) "," 
 			  (compile-formals (cdr formals))))))
 
   (define (compile-arguments arguments)
@@ -59,18 +60,28 @@
       (string-append "new SchemeString (\"" datum "\")"))
      (else (error (format "unsupported literal ~s\n" datum)))))
 
+  ;; if it's not already a legitimate variable name, make it one.
+  (define (compile-identifier sym)
+    (define (legit? c) 
+      (or (char-alphabetic? c)
+	  (char-numeric? c)
+	  (char=? c #\_)))
+    (let ((name (symbol->string sym)))
+      (if (string-skip name legit?)
+	  (string-append "x_" (string-filter legit? (symbol->string sym)))
+	  name)))
 
   (define (compile-1 form)
     (cond
    ;;; variables become JS variables [note, these are all locals]
-     ((symbol? form) (symbol->string form))
+     ((symbol? form) (compile-identifier form))
 
      ((pair? form)
       (case (car form)
 	((set!)
 	 (let ((variable (cadr form))
 	       (value (caddr form)))
-	   (string-append (symbol->string variable) "=(" 
+	   (string-append (compile-identifier variable) "=(" 
 			  (compile-1 value) ")")))
 
 	((quote)
@@ -84,7 +95,8 @@
 
 	((top-level-ref)
 	 (let ((variable (cadr form)))
-	   (string-append "top_level_binding['" (symbol->string variable) "']")))
+	   (string-append "top_level_binding['" 
+			  (symbol->string variable) "']")))
 	
 	((if)
 	 (let ((test (cadr form))
@@ -105,7 +117,7 @@
 	       (let ((rest-var (take-right formals 0))
 		     (main-vars (drop-right formals 0)))
 		 (string-append "function (" (compile-formals main-vars) "){"
-				(symbol->string rest-var)
+				(compile-identifier rest-var)
 				"=sinjs_restify(arguments,"
 				(number->string (length main-vars))
 				"); return " (compile-1 expression) ";}")))))
@@ -127,5 +139,4 @@
      (else (error (format "unknown expression ~s\n" form)))))
 
   (compile-1 form))
-
 
