@@ -35,11 +35,11 @@
     ((_ key (else exprs ...))
      (begin exprs ...))
     ((_ key ((datums ...) exprs ...))
-     (if (memv key 'datums) (begin exprs ...)))
+     (if (memv key '(datums ...)) (begin exprs ...)))
 
     ;; multiple clause form
     ((_ key ((datums ...) exprs ...) more ...)
-     (if (memv key 'datums) (begin exprs ...) (case key more ...)))))
+     (if (memv key '(datums ...)) (begin exprs ...) (case key more ...)))))
 
 (define-syntax and
   (syntax-rules ()
@@ -782,7 +782,7 @@
 ;;; STRING CHAR-DOWNCASE READ-CHAR LIST ERROR EQV? LIST->VECTOR 
 ;;; CHAR-ALPHABETIC? CHAR-NUMERIC? CHAR=? NOT CONS STRING-REF STRING-CI=?
 ;;; STRING-LENGTH STRING->NUMBER STRING->SYMBOL 
-(define (read . port*)
+#;(define (read . port*)
   (let ((port (if (null? port*) (current-input-port) (car port*))))
     (define gathered #f)
     (define delimiters '(#\( #\) #\" #\' #\` #\,
@@ -913,7 +913,7 @@
 ;;; >= CHAR=? STRING-REF PAIR? CDR DISPLAY EQ? SYMBOL? CHAR? SYMBOL->STRING
 ;;; STRING VECTOR? VECTOR->LIST NULL? NUMBER? NUMBER->STRING STRING?
 ;;; PROCEDURE? EOF-OBJECT? PORT?
-(define (write obj . port*)
+#;(define (write obj . port*)
   (let ((port (if (null? port*) (current-output-port) (car port*))))
     (define (write-slashify str)
       (write-char #\" port)
@@ -963,7 +963,7 @@
 ;;; Requires NULL? CURRENT-OUTPUT-PORT CAR WRITE-CHAR PAIR? DISPLAY CDR
 ;;; SYMBOL? SYMBOL->STRING CHAR? VECTOR? VECTOR->LIST PAIR? NULL? NUMBER?
 ;;; STRING? STRING-LENGTH + >= STRING-REF PROCEDURE? EOF-OBJECT? PORT?
-(define (display obj . port*)
+#;(define (display obj . port*)
   (let ((port (if (null? port) (current-output-port) (car port))))
     (define (display-rest tail)
       (cond
@@ -996,7 +996,7 @@
      ((port? obj) (display "#<port>" port)))))
 
 ;;; Requires WRITE-CHAR NULL? CURRENT-OUTPUT-PORT CAR
-(define (newline . port*)
+#;(define (newline . port*)
   (write-char #\newline (if (null? port) (current-output-port) (car port))))
 
 ;;; SYSTEM INTERFACE
