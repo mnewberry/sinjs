@@ -20,7 +20,7 @@
 (define unique-id 0)
 (define (uniquify name)
   (set! unique-id (+ unique-id 1))
-  (string->symbol (string-append (symbol->string name)
+  (string->symbol (string-append (symbol->string name) "_"
 				 (number->string unique-id))))
 
 ;;; An environment ENV is an alist; each identifier maps to either
@@ -312,6 +312,7 @@
   ;; at once, after the values have been determined, as they should be.
   ;; xxx
   (define (finish-body defns exprs)
+    #;(display (format "defns: ~s\nexprs: ~s\n" (map pform defns) (map pform exprs)))
     (when (null? exprs)
       (error finish-body "lambda expression without body is prohibited"))
     (if (null? defns)
@@ -321,15 +322,20 @@
 	       (vals (map caddr defns))
 	       (magic-lambda (list ***special-binding 'lambda #f))
 	       (magic-set! (list ***special-binding 'set! #f)))
-	  (expand
-	   `((,magic-lambda ,vars
-		,@(map (lambda (var val) `(,magic-set! ,var ,val))
-		       vars vals)
-		,@exprs)
-	     ,@(list (length vars) 
-		     'when-i-get-older-losing-my-hair-many-years-form-now))
-	   env))))
+	  #;(display (format "clean defs: ~s\nvars: ~s\nvals: ~s\n" 
+			   (map pform defns)
+			   (map pform vars)
+			   (map pform vals)))
+	  (let ((result `((,magic-lambda ,vars
+					 ,@(map (lambda (var val) `(,magic-set! ,var ,val))
+						vars vals)
+					 ,@exprs)
+			  ,@(make-list (length vars)
+				       '(quote implicit-letrec-undefined-value)))))
+	    #;(display (format "result: ~s\n" (pform result)))
+	    (expand result env)))))
 
+  #;(display (format "\nbody: ~s\n" (map pform forms)))
   (expand-body1 forms '()))
   
 
