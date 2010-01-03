@@ -106,7 +106,7 @@ function top_level_run (n) {
 
 function scheme_top_level() {
     try {
-	sinjs_start_stack (function () {top_level_run(0)};);
+	sinjs_start_stack (function () {top_level_run(0);});
     } catch (e) {
 	if (e.name === "SINJSreturn") {
 	    return e.value;
@@ -120,6 +120,37 @@ function scheme_top_level_done () {
     throw { name: "SINJSreturn", 
 	    value: "sinjs-top-level-undefined" };
 }
+
+// top level REPL support
+// fun is a function, do it!
+function sinjs_repl_execute(fun) {
+    try {
+	sinjs_start_stack (fun);
+    } catch (e) {
+	if (e.name === "SINJSreturn") {
+	    return e.value;
+	} else
+	    throw e;
+    };
+};
+
+// continuation for forms pumped to top level repl.  write the result;
+// then a newline, then throw out to the top.
+//  function sinjs_repl_k(val) {
+//      print ("sinjs_repl_k " + val + "\n");
+//      return (top_level_binding['write'])(sinjs_now_newline, val);
+//  };
+//  function sinjs_now_newline(val) {
+//      return (top_level_binding['newline'])(scheme_top_level_done);
+//  };
+function sinjs_repl_k(fun) {
+    sinjs_repl_execute(function () {fun(sinjs_repl_print_answer);});
+};
+function sinjs_repl_print_answer(answer) {
+    print (answer + "\n");
+    scheme_top_level_done ();
+};
+
 
 //
 // Builtin procedures
@@ -139,19 +170,19 @@ function check_integer(a) {
 }
 
 function check_pair(a) {
-    if (obj.constructor !== Pair)
+    if (a.constructor !== Pair)
 	throw { name: "SINJStypeerror",
 		message: a + " is not a pair" };
 }
 
 function check_symbol(a) {
-    if (typeof(obj) !== "string")
+    if (typeof(a) !== "string")
 	throw { name: "SINJStypeerror",
 		message: a + " is not a symbol" };
 }
 
 function check_string(a) {
-    if (obj.constructor !== SchemeString)
+    if (a.constructor !== SchemeString)
 	throw { name: "SINJStypeerror",
 		message: a + " is not a string" };
 }
@@ -164,13 +195,13 @@ function check_string_and_len (a, n) {
 }
 
 function check_char(a) {
-    if (obj.constructor !== SchemeChar)
+    if (a.constructor !== SchemeChar)
 	throw { name: "SINJStypeerror",
 		message: a + " is not a char" };
 }
 
 function check_vector (a) {
-    if (obj.constructor !== Array) 
+    if (a.constructor !== Array) 
 	throw { name: "SINJStypeerror",
 		message: a + " is not a vector" };
 }
@@ -189,19 +220,19 @@ function check_procedure (a) {
 }
 
 function check_pair_or_null (a) {
-    if ((obj.constructor !== Pair) && (obj !== theNil))
+    if ((a.constructor !== Pair) && (a !== theNil))
 	throw { name: "SINJStypeerror",
 		message: a + " is not a list" };
 }
 
 function check_input_port (a) {
-    if (obj.constructor !== SchemeInputPort)
+    if (a.constructor !== SchemeInputPort)
 	throw { name: "SINJStypeerror",
 		message: a + " is not an input port" };
 }
 
 function check_output_port (a) {
-    if (obj.constructor !== SchemeOutputPort)
+    if (a.constructor !== SchemeOutputPort)
 	throw { name: "SINJStypeerror",
 		message: a + " is not an output port" };
 }
@@ -566,6 +597,9 @@ top_level_binding['close-input-port'] = function (k, port) {
     close = port.closefn;
     if (close !== false) {
 	port.closefn = false;
+	port.readfn = false;
+	port.peekfn = false;
+	port.readyfn = false;
 	(port.closefn)(port);
     };
     return k("close-input-port undefined value");
@@ -576,6 +610,7 @@ top_level_binding['close-output-port'] = function (k, port) {
     close = port.closefn;
     if (close !== false) {
 	port.closefn = false;
+	port.writefn = false;
 	(port.closefn)(port);
     };
     return k("close-output-port undefined value");
@@ -622,5 +657,6 @@ top_level_binding['write-char'] = function (k, c) {
 	port = sinjs_current_output_port;
     };
     check_output_port (port);
-    return k(port.writefn(port, c));
+    port.writefn(port, c);
+    return k("write-char undefined value");
 };
