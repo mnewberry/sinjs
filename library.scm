@@ -445,7 +445,7 @@
 
 ;;; Requires NULL? CAR CDR CONS CAAR CDAR
 (define (append . lists)
-  (let append* (lists lists)
+  (let append* ((lists lists))
     (cond
      ((null? lists) '())
      ((null? (car lists)) (append* (cdr lists)))
