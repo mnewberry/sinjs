@@ -1,0 +1,18 @@
+1) Missing R5RS compliance:
+     dynamic-wind
+     I/O procedures
+     eval
+
+2) Compile to rhino program
+
+3) FFI
+     Scheme->JS
+     JS->Scheme
+
+4) Numbers?
+
+5) Error handling, safe/unsafe modes
+
+6) library namespace hygiene
+
+7) Compile to browser extension
