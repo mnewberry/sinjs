@@ -73,26 +73,34 @@ var sinjs_stack_max = 30;
 // a SINJSrestartstack exception, which simply continues here.  If
 // we get #f as a restart procedure, we return the VAL member of the
 // exception.
+/*
 function sinjs_start_stack(proc) {
     var e = { restart: proc };
-    while (true) {
-	try {
-	    sinjs_stack_depth = 0;
-	    proc ();
-	} catch (newe) {
-	    if (newe.name === "SINJSrestartstack") {
-		if (newe.proc === false) {
-		    return newe.val;
-		}
-		else {
-		    e = newe;
-		}
-	    } else {
-		throw newe;
-	    };
-	};
-    };
+       while (true) {
+	   try {
+	       sinjs_stack_depth = 0;
+	       proc ();
+	   } catch (newe) {
+	       if (newe.name === "SINJSrestartstack") {
+		   if (newe.proc === false) {
+		       return newe.val;
+		   }
+		   else {
+		       e = newe;
+		   }
+	       } else {
+		   throw newe;
+	       };
+	   };
+       };	
 };
+*/
+
+function sinjs_start_stack (proc) {
+    while (true) {
+	proc = proc ();
+    };
+}
 
 // top level execution
 // used as a continuation for storing top-level procedures in the array
@@ -101,12 +109,12 @@ function top_level_return (value){return value;};
 
 // execute the Nth top-level procedure and proceed to the N+1th after.
 function top_level_run (n) {
-    (scheme_top_level_table[n])(function (){top_level_run(n+1);});
+    return (scheme_top_level_table[n])(function (){top_level_run(n+1);});
 }
 
 function scheme_top_level() {
     try {
-	sinjs_start_stack (function () {top_level_run(0);});
+	sinjs_start_stack (function () {return top_level_run(0);});
     } catch (e) {
 	if (e.name === "SINJSreturn") {
 	    return e.value;
@@ -138,22 +146,21 @@ function sinjs_repl_execute(fun) {
 
 // continuation for forms pumped to top level repl.  write the result;
 // then a newline, then throw out to the top.
-//  function sinjs_repl_k(val) {
-//      print ("sinjs_repl_k " + val + "\n");
-//      return (top_level_binding['write'])(sinjs_now_newline, val);
-//  };
-//  function sinjs_now_newline(val) {
-//      return (top_level_binding['newline'])(scheme_top_level_done);
-//  };
+
+// execute the top-level function in repl
 function sinjs_repl_k(fun) {
-    sinjs_repl_execute(function () {fun(sinjs_repl_print_answer);});
+    return sinjs_repl_execute(function () {return fun(sinjs_repl_print_answer);});
 };
+
+// k for top level functions in repl: print answer, then escape
 function sinjs_repl_print_answer(answer) {
     rhino_write(answer);
     scheme_top_level_done ();
 };
+
+// execute the top-level function for library code in repl (don't print answer)
 function sinjs_repl_noprint_k(fun) {
-    sinjs_repl_execute(function () {fun(scheme_top_level_done);});
+    return sinjs_repl_execute(function () {return fun(scheme_top_level_done);});
 };
 
 //

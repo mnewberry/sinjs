@@ -113,14 +113,14 @@
 	     (error "implicit begin not supported in code generation\n"))
 	   (if (list? formals)
 	       (string-append "function (" (compile-formals formals) 
-			      "){return " (compile-1 expression) ";}")
+			      "){return function () {return " (compile-1 expression) ";};}")
 	       (let ((rest-var (take-right formals 0))
 		     (main-vars (drop-right formals 0)))
 		 (string-append "function (" (compile-formals main-vars) "){"
 				(compile-identifier rest-var)
 				"=sinjs_restify(arguments,"
 				(number->string (length main-vars))
-				"); return " (compile-1 expression) ";}")))))
+				"); return function () {return " (compile-1 expression) "};}")))))
 
 	(else
 	 (cond
