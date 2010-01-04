@@ -20,7 +20,10 @@
 (define unique-id 0)
 (define (uniquify name)
   (set! unique-id (+ unique-id 1))
-  (string->symbol (string-append (symbol->string name) "_"
+  (define (realname name)
+    (if (symbol? name) name (realname (identifier->name name))))
+  (string->symbol (string-append (symbol->string (realname name))
+				 "_"
 				 (number->string unique-id))))
 
 ;;; An environment ENV is an alist; each identifier maps to either
@@ -157,8 +160,7 @@
 	   #;(display (format "lambda ~s\n" (pform form)))
 	   (let ((bindings (map-formals-flat (lambda (id)
 					       (cons id 
-						     (uniquify
-						      (identifier->name id))))
+						     (uniquify id)))
 					     (cadr form))))
 	     `(lambda ,(map-formals (lambda (id) (cdr (assq id bindings)))
 				    (cadr form))
