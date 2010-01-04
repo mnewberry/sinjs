@@ -13,7 +13,7 @@
 (define-syntax cond
   (syntax-rules (=> else)
     ;; one clause forms
-    ((_ (else expr exprs ...)) (begin expr exprs ...))
+    ((_ (else expr exprs ...)) (begin 'not-defn expr exprs ...))
     ((_ (test)) test)
     ((_ (test => proc)) (let ((tmp test)) (if tmp (proc tmp))))
     ((_ (test exprs ...)) (if test (begin exprs ...)))
@@ -33,7 +33,7 @@
 
     ;; one clause forms
     ((_ key (else exprs ...))
-     (begin exprs ...))
+     (begin 'not-defn exprs ...))
     ((_ key ((datums ...) exprs ...))
      (if (memv key '(datums ...)) (begin exprs ...)))
 
