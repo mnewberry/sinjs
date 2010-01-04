@@ -16,12 +16,6 @@
 ;;;   Every element of a combination is a variable, lambda expression, 
 ;;;     or literal.
 
-(define unique-id 0)
-(define (uniquify name)
-  (set! unique-id (+ unique-id 1))
-  (string->symbol (string-append (symbol->string name)
-				 (number->string unique-id))))
-
 ;;; Transform FORM into CPS style; passing its result to the code K.
 ;;; This generates lots of extra functions and calls, which we will
 ;;; later reduce.
