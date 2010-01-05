@@ -93,7 +93,7 @@
        (let loop ((var init) ...)
 	 (if test
 	     (begin 'undefined-do-result expr ...)
-	     (loop (last var step ...) ...)))))))
+	     (begin (begin command ...) (loop (last var step ...) ...))))))))
 
 ;;; 4.2.5
 ;;; The R5RS sample implementation requires an auxiliary procedure
@@ -142,17 +142,37 @@
 ;;; R5RS guarantees that standard procedures continue to function correctly
 ;;; even if others have been assigned.  We guarantee this by requiring
 ;;; any procedure used by another standard procedure to be either inlined,
-;;; or specially dealt with.  Each procedure below is documented with the
-;;; procedures it calls (as well as the syntax DELAY and QUASIQUOTE above).
+;;; or specially dealt with.  
 
-;;; All builtin procedures are also inlined unless specially mentioned.
+;;; The strategy then is to inline something if it's easy, or if it
+;;; is used a lot.
+
+;;; All R5RS-specified procedures are inlined except these:
+;;;   equal? max min quotient modulo gcd lcm numerator denominator
+;;;   truncate round rationalize number->string string->number
+;;;   list? list length append reverse list-tail list-ref
+;;;   memq memv member assq assv assoc 
+;;;   char-ci=? char-ci<? char-ci>? char-ci<=? char-ci>=?
+;;;   char-alphabetic? char-numeric? char-whitespace? 
+;;;   char-upper-case? char-lower-case? char-upcase char-downcase
+;;;   make-string string string-append string->list list->string string-fill!
+;;;   string-ci=? string<? string>? string<=? string>=? 
+;;;   string-ci<? string-ci>? string-ci<=? string-ci>=?
+;;;   make-vector vector vector->list list->vector vector-fill!
+;;;   apply map for-each force call-with-current-continuation
+;;;   values call-with-values dynamic-wind
+;;;   = < > <= >=  [with more than one arg]
+;;;   + * [with other than two args]
+;;;   - / [with more than two args]
+;;;   c*r [three or four d/a's]
 
 ;;; PROCEDURES (equivalence)
 ;;;
-;;; Builtin: eq?
+;;; Builtin: eq? eqv?
 
+(define eqv? eq?)	       ;ok b/c we know chars and numbers are eq
 ;;; Requires EQ? CHAR? CHAR=? NUMBER? =
-(define (eqv? a b)
+#;(define (eqv? a b)
   (or (eq? a b)
       (and (char? a)
 	   (char? b)
@@ -581,7 +601,7 @@
 	       (l chars))
       (if (null? l)
 	  s
-	  (begin (string-set! s 0 (car l))
+	  (begin (string-set! s i (car l))
 		 (next (+ i 1) (cdr l)))))))
 
 (define-syntax string-equality
@@ -736,8 +756,8 @@
 ;;;
 ;;; EVAL
 ;;;
-;;; Not implemented:
-;;; eval scheme-report-environment null-environment interaction-environment
+;;; Builtin are:
+;;;   eval scheme-report-environment null-environment interaction-environment
 
 ;;; INPUT AND OUTPUT
 ;;;
@@ -913,7 +933,7 @@
 ;;; >= CHAR=? STRING-REF PAIR? CDR DISPLAY EQ? SYMBOL? CHAR? SYMBOL->STRING
 ;;; STRING VECTOR? VECTOR->LIST NULL? NUMBER? NUMBER->STRING STRING?
 ;;; PROCEDURE? EOF-OBJECT? PORT?
-#;(define (write obj . port*)
+(define (write obj . port*)
   (let ((port (if (null? port*) (current-output-port) (car port*))))
     (define (write-slashify str)
       (write-char #\" port)
@@ -934,7 +954,7 @@
 	(write (car tail) port)
 	(write-rest (cdr tail)))
        (else (display " . " port)
-	     (write (cdr tail) port)
+	     (write tail port)
 	     (write-char #\) port))))
 
     (cond
@@ -947,7 +967,7 @@
 			     ((#\page) "#\\page")
 			     ((#\tab) "#\\tab")
 			     ((#\space) "#\\space")
-			     (else (string #\# #\\ obj)))))
+			     (else (string #\# #\\ obj))) port))
      ((vector? obj) (write-char #\# port) (write (vector->list obj) port))
      ((pair? obj) 
       (write-char #\( port)
@@ -955,7 +975,7 @@
       (write-rest (cdr obj)))
      ((null? obj) (display "()" port))
      ((number? obj) (display (number->string obj) port))
-     ((string? obj) (slashify-string obj))
+     ((string? obj) (write-slashify obj))
      ((procedure? obj) (display "#<procedure>" port))
      ((eof-object? obj) (display "#<eof>" port))
      ((port? obj) (display "#<port>" port)))))
@@ -963,8 +983,8 @@
 ;;; Requires NULL? CURRENT-OUTPUT-PORT CAR WRITE-CHAR PAIR? DISPLAY CDR
 ;;; SYMBOL? SYMBOL->STRING CHAR? VECTOR? VECTOR->LIST PAIR? NULL? NUMBER?
 ;;; STRING? STRING-LENGTH + >= STRING-REF PROCEDURE? EOF-OBJECT? PORT?
-#;(define (display obj . port*)
-  (let ((port (if (null? port) (current-output-port) (car port))))
+(define (display obj . port*)
+  (let ((port (if (null? port*) (current-output-port) (car port*))))
     (define (display-rest tail)
       (cond
        ((null? tail) (write-char #\) port))
@@ -973,7 +993,7 @@
 	(display (car tail) port)
 	(display-rest (cdr tail)))
        (else (display " . " port)
-	     (display (cdr tail) port)
+	     (display tail port)
 	     (write-char #\) port))))
 
     (cond
@@ -987,17 +1007,17 @@
                   (display-rest (cdr obj)))
      ((null? obj) (display "()" port))
      ((number? obj) (display (number->string obj) port))
-     ((string? obj) (let ((len (string-length (obj))))
+     ((string? obj) (let ((len (string-length obj)))
 		      (do ((i 0 (+ i 1)))
 			  ((>= i len))
-			(write-char (string-ref obj i)))))
+			(write-char (string-ref obj i) port))))
      ((procedure? obj) (display "#<procedure>" port))
      ((eof-object? obj) (display "#<eof>" port))
      ((port? obj) (display "#<port>" port)))))
 
 ;;; Requires WRITE-CHAR NULL? CURRENT-OUTPUT-PORT CAR
-#;(define (newline . port*)
-  (write-char #\newline (if (null? port) (current-output-port) (car port))))
+(define (newline . port*)
+  (write-char #\newline (if (null? port*) (current-output-port) (car port*))))
 
 ;;; SYSTEM INTERFACE
 ;;;
