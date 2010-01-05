@@ -3,7 +3,7 @@
 importPackage(java.io, java.lang);
 
 // a rhino input port is a Java InputStreamReader;
-// an output port is a Java OutputStreamReader.
+// an output port is a Java PrintWriter.
 
 function rhino_read (port) {
     var c;
@@ -48,6 +48,7 @@ function rhino_write_close (port) {
 
 function rhino_write (port, c) {
     port.osr.write(c.val);
+    port.osr.flush();
 };
 
 function make_rhino_input_port (stream) {
@@ -81,7 +82,7 @@ top_level_binding['open-output-file'] = function (k, name) {
 	       (new FileWriter (name.val)))));
 };
 
-function rhino_write (answer) {
+function rhino_cheating_write (answer) {
     sinjs_current_output_port.osr.println(answer);
     sinjs_current_output_port.osr.flush();
 }

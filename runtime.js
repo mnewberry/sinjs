@@ -154,8 +154,11 @@ function sinjs_repl_k(fun) {
 
 // k for top level functions in repl: print answer, then escape
 function sinjs_repl_print_answer(answer) {
-    rhino_write(answer);
-    scheme_top_level_done ();
+    return function () {return (top_level_binding['write'])(sinjs_repl_print_newline, answer);};
+}
+
+function sinjs_repl_print_newline(ignored) {
+    return function () {return (top_level_binding['newline'])(scheme_top_level_done);};
 };
 
 // execute the top-level function for library code in repl (don't print answer)
@@ -200,6 +203,7 @@ function check_string(a) {
 
 function check_string_and_len (a, n) {
     check_string (a);
+    check_integer (n);
     if (a.length >= n)
 	throw { name: "SINJSlengtherror",
 		message: n + " is out of bounds for access to " + a};
@@ -219,6 +223,7 @@ function check_vector (a) {
 
 function check_vector_and_len (a, n) {
     check_vector (a);
+    check_integer (n);
     if (a.length >= n)
 	throw { name: "SINJSlengtherror",
 		message: n + " is out of bounds for access to " + a};
@@ -386,7 +391,13 @@ top_level_binding['expt'] = function (k, x, y) {
     return k(Math.pow(x, y));
 };
 
-//missing: number->string string->number
+// XXX
+top_level_binding['number->string'] = function (k, z) {
+    check_number (z);
+    return k(new SchemeString(String(z)));
+};
+
+//missing: string->number
 
 // R5RS 6.3.2
 top_level_binding['pair?'] = function (k, obj) {
@@ -449,14 +460,15 @@ top_level_binding['make-string'] = function (k, n) {
     check_integer(n);
     if (arguments.length > 2) {
 	check_char (arguments[2]);
-	init = arguments[2].val.charCodeAt(0);
+	init = arguments[2].val;
     } else {
-	init = "!".charCodeAt(0); // should stand out nicely
+	init = "!";		// should stand out nicely
     };
     s = '';
     for (i = 0; i < n; i += 1) {
 	s = s + init;
     };
+    print("make string returning " + s);
     return k(new SchemeString(s));
 };
 top_level_binding['string-length'] = function (k, string) {
@@ -465,18 +477,16 @@ top_level_binding['string-length'] = function (k, string) {
 };
 top_level_binding['string-ref'] = function (k, string, n) {
     check_string_and_len (string, n);
-    check_integer (n);
     return k(intern_char(string.val.charAt(n)));
 };
 top_level_binding['string-set!'] = function (k, string, n, c) {
     check_string_and_len (string, n);
     check_char (c);
-    string.val = string.val.slice(0,n) + c + string.val.slice(n+1);
+    string.val = string.val.slice(0,n) + c.val + string.val.slice(n+1);
     return k("string-set! undefined value");
 };
 top_level_binding['substring'] = function (k, string, start, end) {
     check_integer(start);
-    check_integer(end);
     check_string_and_len (string, end - 1);
     return k(new SchemeString (string.val.substring(start,end)));
 }
