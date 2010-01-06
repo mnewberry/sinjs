@@ -471,6 +471,15 @@ top_level_binding['make-string'] = function (k, n) {
     print("make string returning " + s);
     return k(new SchemeString(s));
 };
+top_level_binding['string'] = function (k) {
+    var s, i;
+    s = '';
+    for (i = 1; i < arguments.length; i += 1) {
+	check_char(arguments[i]);
+	s = s + arguments[i].val;
+    };
+    return k(new SchemeString(s));
+};
 top_level_binding['string-length'] = function (k, string) {
     check_string (string);
     return k(string.val.length);
@@ -485,6 +494,31 @@ top_level_binding['string-set!'] = function (k, string, n, c) {
     string.val = string.val.slice(0,n) + c.val + string.val.slice(n+1);
     return k("string-set! undefined value");
 };
+top_level_binding['string=?'] = function (k, s1, s2) {
+    check_string (s1);
+    check_string (s2);
+    return k(s1.val === s2.val);
+};
+top_level_binding['string<?'] = function (k, s1, s2) {
+    check_string (s1);
+    check_string (s2);
+    return k(s1.val < s2.val);
+};
+top_level_binding['string>?'] = function (k, s1, s2) {
+    check_string (s1);
+    check_string (s2);
+    return k(s1.val > s2.val);
+};
+top_level_binding['string<=?'] = function (k, s1, s2) {
+    check_string (s1);
+    check_string (s2);
+    return k(s1.val <= s2.val);
+};
+top_level_binding['string>=?'] = function (k, s1, s2) {
+    check_string (s1);
+    check_string (s2);
+    return k(s1.val >= s2.val);
+};
 top_level_binding['substring'] = function (k, string, start, end) {
     check_integer(start);
     check_string_and_len (string, end - 1);
@@ -498,7 +532,27 @@ top_level_binding['string-append'] = function (k) {
     }
     return k(new SchemeString(s));
 };
-
+top_level_binding['list->string'] = function (k, lis) {
+    var s = "";
+    while (lis !== theNIL) {
+	check_pair(lis);
+	check_char(lis.car);
+	s = s + lis.car.val;
+	lis = lis.cdr;
+    };
+    return k(new SchemeString(s));
+};
+top_level_binding['string-fill!'] = function (k, string, c) {
+    var s, i;
+    check_string (string);
+    check_char (c);
+    s = '';
+    for (i = 0; i < string.val.length; i += 1) {
+	s = s + c.val;
+    };
+    string.val = s;
+    return k("string-fill! undefined value");
+};
 // 6.3.6 Scheme vectors are just JS arrays [from class Array]
 top_level_binding['vector?'] = function (k, obj) {
     return k(obj.constructor===Array);
@@ -517,6 +571,14 @@ top_level_binding['make-vector'] = function (k, n) {
     };
     return k(a);
 };
+top_level_binding['vector'] = function (k) {
+    var a, i;
+    a = [];
+    for (i = 1; i < arguments.length; i += 1) {
+	a[i-1] = arguments[i];
+    };
+    return k(a);
+};
 top_level_binding['vector-length'] = function (k, vector) {
     check_vector (vector);
     return k(vector.length);
@@ -529,6 +591,18 @@ top_level_binding['vector-set!'] = function (k, vector, n, obj) {
     check_vector_and_len (vector, n);
     vector[n] = obj;
     return k("vector-set! undefined value");
+};
+top_level_binding['list->vector'] = function (k, lis) {
+    var a, i;
+    a = [];
+    i = 0;
+    while (lis !== theNIL) {
+	check_pair(lis);
+	a[i] = lis.car;
+	i += 1;
+	lis = lis.cdr;
+    };
+    return k(a);
 };
 
 // R5RS 6.4

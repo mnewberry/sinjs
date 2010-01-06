@@ -161,44 +161,41 @@
 ;;;   make-vector vector vector->list list->vector vector-fill!
 ;;;   apply map for-each force call-with-current-continuation
 ;;;   values call-with-values dynamic-wind
+;;;   call-with-input-file call-with-output-file
+;;;   with-input-from-file with-output-to-file
+;;;   open-input-file open-output-file close-input-port close-output-port
+;;;   read read-char peek-char char-ready? write display newline write-char
 ;;;   = < > <= >=  [with more than one arg]
 ;;;   + * [with other than two args]
 ;;;   - / [with more than two args]
 ;;;   c*r [three or four d/a's]
+;;;   current-input-port current-output-port [with one arg]
 
 ;;; PROCEDURES (equivalence)
 ;;;
-;;; Builtin: eq? eqv?
+;;; Builtin: eq?
 
 (define eqv? eq?)	       ;ok b/c we know chars and numbers are eq
-;;; Requires EQ? CHAR? CHAR=? NUMBER? =
-#;(define (eqv? a b)
-  (or (eq? a b)
-      (and (char? a)
-	   (char? b)
-	   (char=? a b))
-      (and (number? a)
-	   (number? b)
-	   (= a b))))
 
-;;; Requires EQV? PAIR? CAR CDR EQUAL? VECTOR? = VECTOR-LENGTH VECTOR-REF
-;;; STRING? STRING=?
-(define (equal? a b)
-  (or (eqv? a b)
-      (and (pair? a)
-	   (pair? b)
-	   (equal? (car a) (car b))
-	   (equal? (cdr a) (cdr b)))
-      (and (vector? a)
-	   (vector? b)
-	   (= (vector-length a) (vector-length b))
-	   (let next-elt ((i 0))
-	     (or (= i (vector-length a))
-		 (and (equal? (vector-ref a i) (vector-ref b i))
-		      (next-elt (+ i 1))))))
-      (and (string? a)
-	   (string? b)
-	   (string=? a b))))
+(define equal?
+  (let ()
+    (define (equal? a b)
+      (or (eqv? a b)
+	  (and (pair? a)
+	       (pair? b)
+	       (equal? (car a) (car b))
+	       (equal? (cdr a) (cdr b)))
+	  (and (vector? a)
+	       (vector? b)
+	       (= (vector-length a) (vector-length b))
+	       (let next-elt ((i 0))
+		 (or (= i (vector-length a))
+		     (and (equal? (vector-ref a i) (vector-ref b i))
+			  (next-elt (+ i 1))))))
+	  (and (string? a)
+	       (string? b)
+	       (string=? a b))))
+    equal?))
 
 ;;;
 ;;; PROCEDURES (numbers)
@@ -227,16 +224,10 @@
 ;;; of R5RS to omit them if we don't support general complex numbers:
 ;;;   make-rectangular make-polar real-part imag-part magnitude angle
 
-;;; Also inlined:
-;;;   number? complex? real? rational? integer? exact? inexact?  zero?
-;;;   positive? negative? odd? even? exact->inexact? inexact->exact?
-
-
 (define complex? number?)
 (define real? number?)
 (define rational? number?)
 
-;;; Requires NUMBER? = FLOOR
 (define (integer? obj)
   (and (number? obj)
        (= obj (floor obj))))
@@ -244,23 +235,17 @@
 (define (exact? z) #f)
 (define (inexact? z) #t)
 
-;;; Requires =
 (define (zero? z)
   (= z 0))
-;;; Requires >
 (define (positive? x)
   (> x 0))
-;;; Requires <
 (define (negative? x)
   (< x 0))
-;;; Requires = REMAINDER
 (define (odd? n)
   (= 1 (remainder n 2)))
-;;; Requires = REMAINDER
 (define (even? n)
   (= 0 (remainder n 2)))
 
-;;; Requires NULL? > CAR CDR
 (define (max z1 . zs)
   (let loop ((l zs)
 	     (top z1))
@@ -269,7 +254,6 @@
      ((> (car l) top) (loop (cdr l) (car l)))
      (else (loop (cdr l) top)))))
 
-;;; Requires NULL? < CAR CDR
 (define (min z1 . zs)
   (let loop ((l zs)
 	     (bottom z1))
@@ -279,11 +263,9 @@
      (else (loop (cdr l) bottom)))))
 
 ;;; JS has no builtin integer division!
-;;; Requires / - REMAINDER
 (define (quotient n1 n2)
   (/ (- n1 (remainder n1 n2)) n2))
 
-;;; Requires REMAINDER NEGATIVE? POSITIVE? - +
 (define (modulo n1 n2)
   (let ((r (remainder n1 n2)))
     (cond
@@ -293,7 +275,6 @@
       (+ r n2))
      (else r))))
 
-;;; Requires ZERO? ABS REMAINDER NULL? CDR CAR
 (define (gcd . ns)
   (define (gcd* a b)
     (if (zero? b)
@@ -304,16 +285,16 @@
 	g
 	(next (cdr ns) (gcd* g (car ns))))))
 
-;;; Requires * / ABS GCD NULL? CDR CAR
-(define (lcm . ns)
-  (define (lcm* a b)
-    (* (/ (abs a) (gcd a b)) (abs b)))
-  (let next ((ns ns) (m 1))
-    (if (null? ns)
-	m
-	(next (cdr ns) (lcm* m (car ns))))))
+(define lcm
+  (let ((gcd gcd))
+    (lambda ns
+      (define (lcm* a b)
+	(* (/ (abs a) (gcd a b)) (abs b)))
+      (let next ((ns ns) (m 1))
+	(if (null? ns)
+	    m
+	    (next (cdr ns) (lcm* m (car ns))))))
 
-;;; Requires INTEGER? * = + EVEN? - /
 (define (denominator q)
   ;; assume we're dealing with binary floating point
   ;; and search for the right denominator.
@@ -335,11 +316,11 @@
 			(next-search midpoint ub)))))
 	    (next-ub-guess (* ub 2))))))
 
-;;; Requires * DENOMINATOR
-(define (numerator q)
-  (* (denominator q) q))
+(define numerator
+  (let ((denominator denominator))
+    (lambda (q)
+      (* (denominator q) q))))
 
-;;; Requires POSITIVE? FLOOR NEGATIVE? CEILING
 (define (truncate x)
   (cond
    ((positive? x) (floor x))
@@ -348,7 +329,6 @@
 
 ;;; note that it is not clear if JS's Math.round is guaranteed
 ;;; to round even on midpoints.
-;;; Requries - FLOOR < > CEILING EVEN?
 (define (round x)
   (let ((diff (- x (floor x))))
     (cond
@@ -358,7 +338,6 @@
      (else (ceiling x)))))
 
 ;;; Thanks to Alan Bawden.  This is snarfed from the MIT/GNU Scheme source.
-;;; Requires FLOOR < = + / - POSITIVE? NEGATIVE+ 
 (define (rationalize x e)
   (define (loop x y)
     (let ((fx (floor x))
@@ -390,22 +369,14 @@
 ;;;   pair? cons car cdr set-car! set-cdr!
 ;;;   symbol? symbol->string string->symbol 
 ;;;   char? char->integer integer->char
-;;;   string? make-string string-length string-ref string-set!
-;;;   vector? make-vector vector-length vector-ref vector-set!
+;;;   string? make-string string string-length string-ref string-set! 
+;;;   string=? string<? string>? string<=? string>=? list->string string-fill!
+;;;   vector? make-vector vector vector-length vector-ref 
+;;;   vector-set! list->vector
 ;;;
 ;;; For efficiency's sake:
 ;;;   substring string-append
-;;;
-;;; Inlined are also:
-;;;   boolean? not c*r null? list? list length
-;;;   char=? char<? char>? char<=? char>=? 
-;;;   char-ci=? char-ci<? char-ci>? char-ci<=? char-ci>=?
-;;;   char-alphabetic? char-numeric? char-whitespace? 
-;;;   char-upper-case? char-lower-case? char-upcase char-downcase
-;;;   string=?
 
-
-;;; Requires EQ?
 (define (boolean? obj)
   (or (eq? obj #t)
       (eq? obj #f)))
@@ -413,7 +384,6 @@
 (define (not obj)
   (if obj #f #t))
 
-;;; These require CAR CDR C**R C***R
 (define (caar obj) (car (car obj)))
 (define (cadr obj) (car (cdr obj)))
 (define (cdar obj) (cdr (car obj)))
@@ -428,28 +398,26 @@
 (define (cddar obj) (cdr (cdar obj)))
 (define (cdddr obj) (cdr (cddr obj)))
 
-(define (caaaar obj) (car (caaar obj)))
-(define (caaadr obj) (car (caadr obj)))
-(define (caadar obj) (car (cadar obj)))
-(define (caaddr obj) (car (caddr obj)))
-(define (cadaar obj) (car (cdaar obj)))
-(define (cadadr obj) (car (cdadr obj)))
-(define (caddar obj) (car (cddar obj)))
-(define (cadddr obj) (car (cdddr obj)))
-(define (cdaaar obj) (cdr (caaar obj)))
-(define (cdaadr obj) (cdr (caadr obj)))
-(define (cdadar obj) (cdr (cadar obj)))
-(define (cdaddr obj) (cdr (caddr obj)))
-(define (cddaar obj) (cdr (cdaar obj)))
-(define (cddadr obj) (cdr (cdadr obj)))
-(define (cdddar obj) (cdr (cddar obj)))
-(define (cddddr obj) (cdr (cdddr obj)))
+(define (caaaar obj) (caar (caar obj)))
+(define (caaadr obj) (caar (cadr obj)))
+(define (caadar obj) (caar (cdar obj)))
+(define (caaddr obj) (caar (cddr obj)))
+(define (cadaar obj) (cadr (caar obj)))
+(define (cadadr obj) (cadr (cadr obj)))
+(define (caddar obj) (cadr (cdar obj)))
+(define (cadddr obj) (cadr (cddr obj)))
+(define (cdaaar obj) (cdar (caar obj)))
+(define (cdaadr obj) (cdar (cadr obj)))
+(define (cdadar obj) (cdar (cdar obj)))
+(define (cdaddr obj) (cdar (cddr obj)))
+(define (cddaar obj) (cddr (caar obj)))
+(define (cddadr obj) (cddr (cadr obj)))
+(define (cdddar obj) (cddr (cdar obj)))
+(define (cddddr obj) (cddr (cddr obj)))
 
-;;; Requires EQ?
 (define (null? obj)
   (eq? obj '()))
 
-;;; Requires NULL? PAIR? CDR
 (define (list? obj)
   (or (null? obj)
       (and (pair? obj)
@@ -457,13 +425,14 @@
 
 (define (list . objs) objs)
 
-;;; Requires NULL? + LENGTH CDR
-(define (length list)
-  (if (null? list)
-      0
-      (+ 1 (length (cdr list)))))
+(define length
+  (let ()
+    (define (length list)
+      (if (null? list)
+	  0
+	  (+ 1 (length (cdr list)))))
+    length))
 
-;;; Requires NULL? CAR CDR CONS CAAR CDAR
 (define (append . lists)
   (let append* ((lists lists))
     (cond
@@ -471,7 +440,6 @@
      ((null? (car lists)) (append* (cdr lists)))
      (else (cons (caar lists) (append* (cons (cdar lists) (cdr lists))))))))
 
-;;; Requires NULL? CDR CONS CAR
 (define (reverse list)
   (let next ((list list) 
 	     (so-far '()))
@@ -479,65 +447,88 @@
 	so-far
 	(next (cdr list) (cons (car list) so-far)))))
 
-;;; Requires ZERO? CDR -
-(define (list-tail list k)
-  (if (zero? k)
-      list
-      (list-tail (cdr list) (- k 1))))
+(define list-tail
+  (let ()
+    (define (list-tail list k)
+      (if (zero? k)
+	  list
+	  (list-tail (cdr list) (- k 1))))
+    list-tail))
 
-;;; Requires ZERO? CAR CDR -
 (define (list-ref list k)
   (if (zero? k)
       (car list)
       (list-ref (cdr list) (- k 1))))
 
-;;; Requires PAIR? EQ? CAR MEMQ CDR
-(define (memq obj list)
-  (and (pair? list)
-       (if (eq? obj (car list))
-	   list
-	   (memq obj (cdr list)))))
+(define memq
+  (let ()
+    (define (memq obj list)
+      (and (pair? list)
+	   (if (eq? obj (car list))
+	       list
+	       (memq obj (cdr list)))))
+    memq))
 
-;;; Requires PAIR? EQV? CAR MEMV CDR
-(define (memv obj list)
-  (and (pair? list)
-       (if (eqv? obj (car list))
-	   list
-	   (memv obj (cdr list)))))
+(define memv
+  (let ()
+    (define (memv obj list)
+      (and (pair? list)
+	   (if (eqv? obj (car list))
+	       list
+	       (memv obj (cdr list)))))
+    memv))
 
-;;; Requires PAIR? EQUAL? CAR MEMBER CDR
-(define (member obj list)
-  (and (pair? list)
-       (if (equal? obj (car list))
-	   list
-	   (member obj (cdr list)))))
+(define member
+  (let ((equal? equal?))
+    (define (member obj list)
+      (and (pair? list)
+	   (if (equal? obj (car list))
+	       list
+	       (member obj (cdr list)))))
+    member))
 
-;;; Requires PAIRL EQ? CAAR CAR ASSQ CDR
-(define (assq obj alist)
-  (and (pair? alist)
+
+(define assq
+  (let ()
+    (define (assq obj alist)
+      (and (pair? alist)
        (if (eq? obj (caar alist))
 	   (car alist)
 	   (assq obj (cdr alist)))))
+    assq))
 
-;;; Requires PAIR? EQV? CAAR CAR ASSV CDR
-(define (assv obj alist)
-  (and (pair? alist)
-       (if (eqv? obj (caar alist))
-	   (car alist)
-	   (assv obj (cdr alist)))))
+(define assv
+  (let ()
+    (define (assv obj alist)
+      (and (pair? alist)
+	   (if (eqv? obj (caar alist))
+	       (car alist)
+	       (assv obj (cdr alist)))))
+    assv))
 
-;;; Requires PAIR? EQUAL? CAAR CAR ASSOC CDR
-(define (assoc obj alist)
-  (and (pair? alist)
-       (if (equal? obj (caar alist))
-	   (car alist)
-	   (assoc obj (cdr alist)))))
+(define assoc
+  (let ((equal? equal?))
+    (define (assoc obj alist)
+      (and (pair? alist)
+	   (if (equal? obj (caar alist))
+	       (car alist)
+	       (assoc obj (cdr alist)))))
+    assoc))
 
 (define-syntax char-compare
   (syntax-rules ()
     ((_ name test? cvt)
      (define (name char1 char2)
        (test? (cvt char1) (cvt char2))))))
+(define-syntax char-compare-protect
+  (syntax-rules ()
+    ((_ name test? cvt)
+     (define name
+       (let ((cvt cvt)
+	     (test? test?))
+	 (lambda (char1 char2)
+	   (test? (cvt char1) (cvt char2))))))))
+
 
 ;;; Each requires the specified two procedures
 (char-compare char=? = char->integer)
@@ -545,23 +536,23 @@
 (char-compare char>? > char->integer)
 (char-compare char<=? <= char->integer)
 (char-compare char>=? >= char->integer)
-(char-compare char-ci=? char=? char-upcase)
-(char-compare char-ci<? char<? char-upcase)
-(char-compare char-ci>? char>? char-upcase)
-(char-compare char-ci<=? char<=? char-upcase)
-(char-compare char-ci>=? char>=? char-upcase)
+(char-compare-protect char-ci=? char=? char-upcase)
+(char-compare-protect char-ci<? char<? char-upcase)
+(char-compare-protect char-ci>? char>? char-upcase)
+(char-compare-protect char-ci<=? char<=? char-upcase)
+(char-compare-protect char-ci>=? char>=? char-upcase)
 
-;;; Requires CHAR-UPPER-CASE? CHAR-LOWER-CASE?
-(define (char-alphabetic? c)
-  (or (char-upper-case? c)
-      (char-lower-case? c)))
+(define char-alphabetic?
+  (let ((char-upper-case char-upper-case)
+	(char-lower-case char-lower-care))
+    (lambda (c)
+      (or (char-upper-case? c)
+	  (char-lower-case? c)))))
 
-;;; Requires CHAR->INTEGER >= <=
 (define (char-numeric? c)
   (let ((n (char->integer c)))
     (and (>= n 48) (<= n 57))))
 
-;;; Requires CHAR->INTEGER =
 (define (char-whitespace? c)
   (let ((n (char->integer c)))
     (or (= n 32)			;space
@@ -570,83 +561,63 @@
 	(= n 12)			;formfeed
 	(= n 13))))			;carriage return
 
-;;; Requires CHAR->INTEGER >= <=
 (define (char-upper-case? c)
   (let ((n (char->integer c)))
     (and (>= n 65) (<= n 90))))
 
-;;; Requires CHAR->INTEGER >= <=
 (define (char-lower-case? c)
   (let ((n (char->integer c)))
     (and (>= n 97) (<= n 122))))
   
-;;; Requires CHAR-LOWER-CASE? INTEGER->CHAR - CHAR->INTEGER
-(define (char-upcase c)
-  (if (char-lower-case? c)
-      (integer->char (- (char->integer c) 32))
-      c))
+(define char-upcase
+  (let ((char-lower-case char-lower-case))
+    (if (char-lower-case? c)
+	(integer->char (- (char->integer c) 32))
+	c)))
 
-;;; Requires CHAR-UPPER-CASE? INTEGER->CHAR + CHAR->INTEGER
-(define (char-downcase c)
-  (if (char-upper-case? c)
-      (integer->char (+ (char->integer c) 32))
-      c))
+(define char-downcase
+  (let ((char-upper-case char-upper-case))
+    (lambda (c)
+      (if (char-upper-case? c)
+	  (integer->char (+ (char->integer c) 32))
+	  c))))
 
-;; this is bad, given that string-set! is so slow given
-;; the immutability of JS strings.
-;;; Requires MAKE-STRING LENGTH NULL? STRING-SET! CAR + CDR
-(define (string . chars)
-  (let ((s (make-string (length chars))))
-    (let next ((i 0)
-	       (l chars))
-      (if (null? l)
-	  s
-	  (begin (string-set! s i (car l))
-		 (next (+ i 1) (cdr l)))))))
+(define string-ci=?
+  (let ((char-ci=? char-ci=?))
+    (lambda (string1 string2)
+      (let ((len (string-length string1)))
+	(and (= len (string-length string2))
+	     (let next ((i 0))
+	       (or (= i len)
+		   (and (char-ci=? (string-ref string1 i)
+				   (string-ref string2 i))
+			(next (+ i 1))))))))))
 
-(define-syntax string-equality
+(define-syntax string-compare-ci
   (syntax-rules ()
-    ((_ name chartest?)
-     (define (name string1 string2)
-       (let ((len (string-length string1)))
-	 (and (= len (string-length string2))
-	      (let next ((i 0))
-		(or (= i len)
-		    (and (chartest? (string-ref string1 i)
+    ((_ name lentest? chartest?)
+     (define name
+       (let ((lentest? lentest?)
+	     (chartest? chartest?)
+	     (char-ci=? char-ci=?))
+	 (define (name string1 string2)
+	   (let ((len1 (string-length string1))
+		 (len2 (string-length string2)))
+	     (let ((minlen (min len1 len2)))
+	       (let next ((i 0))
+		 (if (= i minlen)
+		     (lentest? len1 len2)
+		     (or (chartest? (string-ref string1 i)
 				    (string-ref string2 i))
-			 (next (+ i 1)))))))))))
+			 (and (char-ci=? (string-ref string1 i)
+					 (string-ref string2 i))
+			      (next (+ i 1))))))))))))))
 
-;;; Each requires the specified char proc, and STRING-LENGTH = STRING-REF +     
-(string-equality string=? char=?)
-(string-equality string-ci=? char-ci=?)
+(string-compare-ci string-ci<? < char-ci<?)
+(string-compare-ci string-ci>? > char-ci>?)
+(string-compare-ci string-ci<=? <= char-ci<=?)
+(string-compare-ci string-ci>=? >= char-ci>=?)
 
-(define-syntax string-compare
-  (syntax-rules ()
-    ((_ name lentest? chartest? chareqtest?)
-     (define (name string1 string2)
-       (let ((len1 (string-length string1))
-	     (len2 (string-length string2)))
-	 (let ((minlen (min len1 len2)))
-	   (let next ((i 0))
-	     (if (= i minlen)
-		 (lentest? len1 len2)
-		 (or (chartest? (string-ref string1 i)
-				(string-ref string2 i))
-		     (and (chareqtest? (string-ref string1 i)
-				       (string-ref string2 i))
-			  (next (+ i 1))))))))))))
-
-;;; Each requires the three specified procs, and = STRING-REF +
-(string-compare string<? < char<? char=?)
-(string-compare string>? > char>? char=?)
-(string-compare string<=? <= char<=? char=?)
-(string-compare string>=? >= char>=? char=?)
-(string-compare string-ci<? < char-ci<? char-ci=?)
-(string-compare string-ci>? > char-ci>? char-ci=?)
-(string-compare string-ci<=? <= char-ci<=? char-ci=?)
-(string-compare string-ci>=? >= char-ci>=? char-ci=?)
-
-;;; Requires STRING-LENGTH = - CONS STRING-REF
 (define (string->list s)
   (let ((len (string-len s)))
     (let next-char ((i len)
@@ -655,33 +626,9 @@
 	  lis
 	  (next-char (- i 1) (cons (string-ref s (- i 1)) lis))))))
 
-;;; Requires LENGTH MAKE-STRING = STRING-SET! CAR + CDR
-(define (list->string lis)
-  (let* ((len (length lis))
-	 (s (make-string len)))
-    (let next-char ((i 0)
-		    (lis lis))
-      (if (= i len)
-	  s
-	  (begin (string-set! s i (car lis))
-		 (next-char (+ i 1) (cdr lis)))))))
-
-;;; Requires SUBSTRING STRING-LENGTH
 (define (string-copy s)
   (substring s 0 (string-length s)))
 
-;;;Requires STRING-LENGTH + = STRING-SET!
-(define (string-fill! s c)
-  (let ((len (string-length s)))
-    (do ((i 0 (+ i 1)))
-	((= i len))
-      (string-set! s i c))))
-
-;;; Requires LIST->VECTOR
-(define (vector . objs)
-  (list->vector objs))
-
-;;; Requires VECTOR-LENGTH - CONS VECTOR-REF
 (define (vector->list v)
   (let ((len (vector-length v)))
     (let next-elt ((i len)
@@ -690,15 +637,6 @@
 	  lis
 	  (next-elt (- i 1) (cons (vector-ref v (- i 1)) lis))))))
 
-;;; Requires MAKE-VECTOR LENGTH + CDR NULL? VECTOR-SET! CAR
-(define (list->vector lis)
-  (let ((v (make-vector (length lis))))
-    (do ((i 0 (+ i 1))
-	 (lis lis (cdr lis)))
-	((null? lis) v)
-      (vector-set! v i (car lis)))))
-
-;;; Requires VECTOR-LENGTH + = VECTOR-SET!
 (define (vector-fill! v elt)
   (let ((len (vector-length v)))
     (do ((i 0 (+ i 1)))
@@ -712,31 +650,34 @@
 ;;;   procedure? apply call-with-current-continuation call-with-values
 ;;;   dynamic-wind
 
-;;; Requires NULL? REVERSE CDR CONS CAR APPLY MAP
-(define (map proc list . lists)
-  (if (null? lists)
-      (let map1 ((inlist list)
-		 (outlist '()))
-	(if (null? inlist)
-	    (reverse outlist)
-	    (map1 (cdr inlist) (cons (proc (car inlist)) outlist))))
-      (let map1 ((inlists (cons list lists))
-		 (outlist '()))
-	(if (null? (car inlists))
-	    (reverse outlist)
-	    (map1 (map cdr inlists)
-		  (cons (apply proc (map car inlists)) outlist))))))
+(define map
+  (let ((reverse reverse)
+	(apply apply))
+    (define map (proc list . lists)
+      (if (null? lists)
+	  (let map1 ((inlist list)
+		     (outlist '()))
+	    (if (null? inlist)
+		(reverse outlist)
+		(map1 (cdr inlist) (cons (proc (car inlist)) outlist))))
+	  (let map1 ((inlists (cons list lists))
+		     (outlist '()))
+	    (if (null? (car inlists))
+		(reverse outlist)
+		(map1 (map cdr inlists)
+		      (cons (apply proc (map car inlists)) outlist))))))
+    map))
 
-;;; Requires NOT NULL? APPLY MAP CAR FOR-EACH CDR
-(define (for-each proc . lists)
-  (if (not (null? (car lists)))
-      (begin
-	(apply proc (map car lists))
-	(for-each proc (map cdr lists)))))
+(define for-each
+  (let ((apply apply)
+	(map map))
+    (define (for-each proc . lists)
+      (if (not (null? (car lists)))
+	  (begin
+	    (apply proc (map car lists))
+	    (for-each proc (map cdr lists)))))
+    for-each))
 
-;; Recall that a promise is a cons (FORCED . PROC/VAL).  If FORCED, 
-;; the cdr holds the value; if not forced, it holds a thunk.
-;;; Requires CAR CDR SET-CAR! SET-CDR!
 (define (force promise)
   (if (car promise)
       (cdr promise)
@@ -747,11 +688,13 @@
 		   (set-cdr! promise val)
 		   val)))))
 
-;;; Requires APPLY
-(define (values . vals)
-  (call-with-current-continuation
-   (lambda (c)
-     (apply c vals))))
+(define values
+  (let ((apply apply)
+	(call-with-current-continuation call-with-current-continuation))
+    (lambda vals
+      (call-with-current-continuation
+       (lambda (c)
+	 (apply c vals))))))
 
 ;;;
 ;;; EVAL
@@ -767,36 +710,43 @@
 ;;;   current-input-port current-output-port [with an arg, sets it, returns old]
 ;;;   read-char peek-char eof-object? char-ready? write-char
 ;;;
-;;; Requires OPEN-INPUT-FILE CLOSE-INPUT-PORT
-(define (call-with-input-file str proc)
-  (let ((p (open-input-file str)))
-    (proc p)
-    (close-input-port p)))
+(define call-with-input-file
+  (let ((open-input-file open-input-file)
+	(close-input-port close-input-port))
+    (lambda (str proc)
+      (let ((p (open-input-file str)))
+	(proc p)
+	(close-input-port p)))))
 
-;;; Requires OPEN-OUTPUT-FILE CLOSE-OUTPUT-PORT
-(define (call-with-output-file str proc)
-  (let ((p (open-output-file str)))
-    (proc p)
-    (close-output-port p)))
+(define call-with-output-file
+  (let ((open-output-file open-output-file)
+	(close-output-port close-output-port))
+    (lambda (str proc)
+      (let ((p (open-output-file str)))
+	(proc p)
+	(close-output-port p)))))
 
-;;; Requires INPUT-PORT? OUTPUT-PORT?
 (define (port? p)
   (or (input-port? p)
       (output-port? p)))
 
-;;; Requires CALL-WITH-INPUT-FILE CURRENT-INPUT-PORT
-(define (with-input-from-file str proc)
-  (call-with-input-file str (lambda (p)
-			      (let ((old (current-input-port p)))
-				(proc)
-				(current-input-port old)))))
+(define with-input-from-file
+  (let ((call-with-input-file call-with-input-file)
+	(current-input-port current-input-port))
+    (lambda (str proc)
+      (call-with-input-file str (lambda (p)
+				  (let ((old (current-input-port p)))
+				    (proc)
+				    (current-input-port old)))))))
 
-;;; Requires CALL-WITH-OUTPUT-FILE CURRENT-OUTPUT-PORT
-(define (with-output-to-file str proc)
-  (call-with-output-file str (lambda (p)
-			       (let ((old (current-output-port p)))
-				 (proc)
-				 (current-output-port old)))))
+(define with-output-to-file
+  (let ((call-with-output-file call-with-output-file)
+	(current-output-port current-output-port))
+    (lambda (str proc)
+      (call-with-output-file str (lambda (p)
+				   (let ((old (current-output-port p)))
+				     (proc)
+				     (current-output-port old)))))))
 
 ;;; Requires NULL? CURRENT-INPUT-PORT CAR PEEK-CHAR MEMV STRING-APPEND
 ;;; STRING CHAR-DOWNCASE READ-CHAR LIST ERROR EQV? LIST->VECTOR 
@@ -929,95 +879,105 @@
 
     (read*)))
 
-;;; Requires NULL? CURRENT-OUTPUT-PORT CAR WRITE-CHAR STRING-LENGTH +
-;;; >= CHAR=? STRING-REF PAIR? CDR DISPLAY EQ? SYMBOL? CHAR? SYMBOL->STRING
-;;; STRING VECTOR? VECTOR->LIST NULL? NUMBER? NUMBER->STRING STRING?
-;;; PROCEDURE? EOF-OBJECT? PORT?
-(define (write obj . port*)
-  (let ((port (if (null? port*) (current-output-port) (car port*))))
-    (define (write-slashify str)
-      (write-char #\" port)
-      (let ((len (string-length str)))
-	(do ((i 0 (+ i 1)))
-	    ((>= i len))
-	  (if (or (char=? (string-ref str i) #\")
-		  (char=? (string-ref str i) #\\))
-	      (write-char #\\ port))
-	  (write-char (string-ref str i) port)))
-      (write-char #\" port))
+(define write
+  (let ((current-output-port current-output-port)
+	(write-char write-char)
+	(display display)
+	(vector->list vector->list)
+	(number->string number->string)
+	(port? port?))
+    (define (write obj . port*)
+      (let ((port (if (null? port*) (current-output-port) (car port*))))
+	(define (write-slashify str)
+	  (write-char #\" port)
+	  (let ((len (string-length str)))
+	    (do ((i 0 (+ i 1)))
+		((>= i len))
+	      (if (or (char=? (string-ref str i) #\")
+		      (char=? (string-ref str i) #\\))
+		  (write-char #\\ port))
+	      (write-char (string-ref str i) port)))
+	  (write-char #\" port))
 
-    (define (write-rest tail)
-      (cond
-       ((null? tail) (write-char #\) port))
-       ((pair? tail)
-	(write-char #\space port)
-	(write (car tail) port)
-	(write-rest (cdr tail)))
-       (else (display " . " port)
-	     (write tail port)
-	     (write-char #\) port))))
+	(define (write-rest tail)
+	  (cond
+	   ((null? tail) (write-char #\) port))
+	   ((pair? tail)
+	    (write-char #\space port)
+	    (write (car tail) port)
+	    (write-rest (cdr tail)))
+	   (else (display " . " port)
+		 (write tail port)
+		 (write-char #\) port))))
 
-    (cond
-     ((eq? obj #t) (display "#t" port))
-     ((eq? obj #f) (display "#f" port))
-     ((symbol? obj) (display (symbol->string obj) port))
-     ((char? obj) (display (case obj
-			     ((#\newline) "#\\newline")
-			     ((#\return) "#\\return")
-			     ((#\page) "#\\page")
-			     ((#\tab) "#\\tab")
-			     ((#\space) "#\\space")
-			     (else (string #\# #\\ obj))) port))
-     ((vector? obj) (write-char #\# port) (write (vector->list obj) port))
-     ((pair? obj) 
-      (write-char #\( port)
-      (write (car obj) port) 
-      (write-rest (cdr obj)))
-     ((null? obj) (display "()" port))
-     ((number? obj) (display (number->string obj) port))
-     ((string? obj) (write-slashify obj))
-     ((procedure? obj) (display "#<procedure>" port))
-     ((eof-object? obj) (display "#<eof>" port))
-     ((port? obj) (display "#<port>" port)))))
+	(cond
+	 ((eq? obj #t) (display "#t" port))
+	 ((eq? obj #f) (display "#f" port))
+	 ((symbol? obj) (display (symbol->string obj) port))
+	 ((char? obj) (display (case obj
+				 ((#\newline) "#\\newline")
+				 ((#\return) "#\\return")
+				 ((#\page) "#\\page")
+				 ((#\tab) "#\\tab")
+				 ((#\space) "#\\space")
+				 (else (string #\# #\\ obj))) port))
+	 ((vector? obj) (write-char #\# port) (write (vector->list obj) port))
+	 ((pair? obj) 
+	  (write-char #\( port)
+	  (write (car obj) port) 
+	  (write-rest (cdr obj)))
+	 ((null? obj) (display "()" port))
+	 ((number? obj) (display (number->string obj) port))
+	 ((string? obj) (write-slashify obj))
+	 ((procedure? obj) (display "#<procedure>" port))
+	 ((eof-object? obj) (display "#<eof>" port))
+	 ((port? obj) (display "#<port>" port)))))
+    write))
 
-;;; Requires NULL? CURRENT-OUTPUT-PORT CAR WRITE-CHAR PAIR? DISPLAY CDR
-;;; SYMBOL? SYMBOL->STRING CHAR? VECTOR? VECTOR->LIST PAIR? NULL? NUMBER?
-;;; STRING? STRING-LENGTH + >= STRING-REF PROCEDURE? EOF-OBJECT? PORT?
-(define (display obj . port*)
-  (let ((port (if (null? port*) (current-output-port) (car port*))))
-    (define (display-rest tail)
-      (cond
-       ((null? tail) (write-char #\) port))
-       ((pair? tail)
-	(write-char #\space port)
-	(display (car tail) port)
-	(display-rest (cdr tail)))
-       (else (display " . " port)
-	     (display tail port)
-	     (write-char #\) port))))
+(define display
+  (let ((current-output-port current-output-port)
+	(write-char write-char)
+	(vector->list vector->list)
+	(port? port?))
+    (define (display obj . port*)
+      (let ((port (if (null? port*) (current-output-port) (car port*))))
+	(define (display-rest tail)
+	  (cond
+	   ((null? tail) (write-char #\) port))
+	   ((pair? tail)
+	    (write-char #\space port)
+	    (display (car tail) port)
+	    (display-rest (cdr tail)))
+	   (else (display " . " port)
+		 (display tail port)
+		 (write-char #\) port))))
 
-    (cond
-     ((eq? obj #t) (display "#t" port))
-     ((eq? obj #f) (display "#f" port))
-     ((symbol? obj) (display (symbol->string obj) port))
-     ((char? obj) (write-char obj port))
-     ((vector? obj) (write-char #\# port) (display (vector->list obj) port))
-     ((pair? obj) (write-char #\( port)
-                  (display (car obj) port) 
-                  (display-rest (cdr obj)))
-     ((null? obj) (display "()" port))
-     ((number? obj) (display (number->string obj) port))
-     ((string? obj) (let ((len (string-length obj)))
-		      (do ((i 0 (+ i 1)))
-			  ((>= i len))
-			(write-char (string-ref obj i) port))))
-     ((procedure? obj) (display "#<procedure>" port))
-     ((eof-object? obj) (display "#<eof>" port))
-     ((port? obj) (display "#<port>" port)))))
-
-;;; Requires WRITE-CHAR NULL? CURRENT-OUTPUT-PORT CAR
-(define (newline . port*)
-  (write-char #\newline (if (null? port*) (current-output-port) (car port*))))
+	(cond
+	 ((eq? obj #t) (display "#t" port))
+	 ((eq? obj #f) (display "#f" port))
+	 ((symbol? obj) (display (symbol->string obj) port))
+	 ((char? obj) (write-char obj port))
+	 ((vector? obj) (write-char #\# port) (display (vector->list obj) port))
+	 ((pair? obj) (write-char #\( port)
+	  (display (car obj) port) 
+	  (display-rest (cdr obj)))
+	 ((null? obj) (display "()" port))
+	 ((number? obj) (display (number->string obj) port))
+	 ((string? obj) (let ((len (string-length obj)))
+			  (do ((i 0 (+ i 1)))
+			      ((>= i len))
+			    (write-char (string-ref obj i) port))))
+	 ((procedure? obj) (display "#<procedure>" port))
+	 ((eof-object? obj) (display "#<eof>" port))
+	 ((port? obj) (display "#<port>" port)))))
+    display))
+    
+(define newline
+  (let ((write-char write-char)
+	(current-output-port current-output-port))
+    (lambda port*
+      (write-char #\newline 
+		  (if (null? port*) (current-output-port) (car port*))))))
 
 ;;; SYSTEM INTERFACE
 ;;;

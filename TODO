@@ -13,8 +13,6 @@
 
 5) Error handling, safe/unsafe modes
 
-6) library namespace hygiene
+6) Compile to browser extension
 
-7) Compile to browser extension
-
-8) Spidermonkey JS support?
+7) Spidermonkey JS support?
