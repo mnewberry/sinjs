@@ -11,9 +11,9 @@
 ;;;   => (k ((INLINE +) arg1 arg2))
 ;;;
 ;;; Each inlinable is specified in this table:
-;;; NAME COMPLEX? NARGS MAXARGS FORMAT
+;;; (NAME? NARGS) FORMAT
 ;;;   NAME is a symbol naming the procedure
-;;;   NARGS is the minimum number of args expected
+;;;   NARGS is the number of args expected
 ;;;   FORMAT is a format string to compile the inline with ~a for the
 ;;;     compiled arguments, or a lambda
 (define inlinables
@@ -43,133 +43,133 @@
     (define (binumop-simple op)
       (binumop (string-append "((~a)" op "(~a))")))
 
-    '((eq? 2 "((~a)===(~a))")
-      (eqv? 2 "((~a)===(~a))")
+    '(((eq? 2) "((~a)===(~a))")
+      ((eqv? 2) "((~a)===(~a))")
 
-      (number? 1 "typeof(~a) === 'number'")
-      (complex? 1 "typeof(~a) === 'number'")
-      (real? 1 "typeof(~a) === 'number'")
-      (rational? 1 "typeof(~a) === 'number'")
-      (integer? 1 ,(lambda (arg) (format "typeof(~a)==='number' && (Math.floor(~a)===(~a))"
+      ((number? 1) "typeof(~a) === 'number'")
+      ((complex? 1) "typeof(~a) === 'number'")
+      ((real? 1) "typeof(~a) === 'number'")
+      ((rational? 1) "typeof(~a) === 'number'")
+      ((integer? 1) ,(lambda (arg) (format "typeof(~a)==='number' && (Math.floor(~a)===(~a))"
 					 arg arg)))
-      (exact? 1 "false")
-      (inexact? 1 "true")
-      (= 2 ,(binumop-simple "==="))
-      (< 2 ,(binumop-simple "<"))
-      (> 2 ,(binumop-simple ">"))
-      (<= 2 ,(binumop-simple "<="))
-      (>= 2 ,(binumop-simple ">="))
-      (zero? 1 ,(unnumop "(~a)===0"))
-      (positive? 1 ,(unnumop "(~a)>0"))
-      (negative? 1 ,(unnumop "(~a)<0"))
-      (odd? 1 ,(unintop "(~a)%2!==0"))
-      (even? 1 ,(unintop "(~a)%2===0"))
-      (+ 2 ,(binumop-simple "+"))
-      (* 2 ,(binumop-simple "*"))
-      (- 1 ,(unnumop "-(~a)"))
-      (- 2 ,(binumop-simple "-"))
-      (/ 1 ,(unnumop "1/(~a)"))
-      (/ 2 ,(binumop-simple "/"))
-      (abs 1 ,(unnumop "Math.abs(~a)")))
-    (remainder 2 ,(binintop "(~a)%(~a)"))
-    (floor 1 ,(unnumop "Math.floor(~a)"))
-    (ceiling 1 ,(unnumop "Math.ceil(~a)"))
-    (exp 1 ,(unnumop "Math.exp(~a)"))
-    (log 1 ,(unnumop "Math.log(~a)"))
-    (sin 1 ,(unnumop "Math.sin(~a)"))
-    (cos 1 ,(unnumop "Math.cos(~a)"))
-    (tan 1 ,(unnumop "Math.tan(~a)"))
-    (asin 1 ,(unnumop "Math.asin(~a)"))
-    (acos 1 ,(unnumop "Math.acos(~a)"))
-    (atan 1 ,(unnumop "Math.atan(~a)"))
-    (sqrt 1 ,(unnumop "Math.sqrt(~a)"))
-    (expt 2 ,(binumop "Math.pow(~a,~a)"))
-    (exact->inexact 1 ,(unnumop "~a"))
-    (inexact->exact 1 ,(unnumop "~a"))
+      ((exact? 1) "false")
+      ((inexact? 1) "true")
+      ((= 2) ,(binumop-simple "==="))
+      ((< 2) ,(binumop-simple "<"))
+      ((> 2) ,(binumop-simple ">"))
+      ((<= 2) ,(binumop-simple "<="))
+      ((>= 2) ,(binumop-simple ">="))
+      ((zero? 1) ,(unnumop "(~a)===0"))
+      ((positive? 1) ,(unnumop "(~a)>0"))
+      ((negative? 1) ,(unnumop "(~a)<0"))
+      ((odd? 1) ,(unintop "(~a)%2!==0"))
+      ((even? 1) ,(unintop "(~a)%2===0"))
+      ((+ 2) ,(binumop-simple "+"))
+      ((* 2) ,(binumop-simple "*"))
+      ((- 1) ,(unnumop "-(~a)"))
+      ((- 2) ,(binumop-simple "-"))
+      ((/ 1) ,(unnumop "1/(~a)"))
+      ((/ 2) ,(binumop-simple "/"))
+      ((abs 1) ,(unnumop "Math.abs(~a)"))
+      ((remainder 2) ,(binintop "(~a)%(~a)"))
+      ((floor 1) ,(unnumop "Math.floor(~a)"))
+      ((ceiling 1) ,(unnumop "Math.ceil(~a)"))
+      ((exp 1) ,(unnumop "Math.exp(~a)"))
+      ((log 1) ,(unnumop "Math.log(~a)"))
+      ((sin 1) ,(unnumop "Math.sin(~a)"))
+      ((cos 1) ,(unnumop "Math.cos(~a)"))
+      ((tan 1) ,(unnumop "Math.tan(~a)"))
+      ((asin 1) ,(unnumop "Math.asin(~a)"))
+      ((acos 1) ,(unnumop "Math.acos(~a)"))
+      ((atan 1) ,(unnumop "Math.atan(~a)"))
+      ((sqrt 1) ,(unnumop "Math.sqrt(~a)"))
+      ((expt 2) ,(binumop "Math.pow(~a,~a)"))
+      ((exact->inexact 1) ,(unnumop "~a"))
+      ((inexact->exact 1) ,(unnumop "~a"))
 
-    (not 1 "(~a)===false")
-    (boolean? 1 "typeof(~a)==='boolean'")
+      ((not 1) "(~a)===false")
+      ((boolean? 1) "typeof(~a)==='boolean'")
 
-    (pair? 1 "(~a).constructor===Pair")
-    (cons 2 "new Pair(~a,~a)")
-    (car 1 ,(lambda (p) (format "check_pair(~a)&&(~a).car" p p))
-	 (cdr 1 ,(lambda (p) (format "check_pair(~a)&&(~a).cdr" p p)))
-	 (caar 1 
-	       ,(lambda (p) 
-		  (format "check_pair(~a)&&check_pair(~a.car)&&(~a).car.car" p p p)))
-	 (cadr 1
-	       ,(lambda (p) 
-		  (format "check_pair(~a)&&check_pair(~a.cdr)&&(~a).cdr.car" p p p)))
-	 (cdar 1
-	       ,(lambda (p) 
-		  (format "check_pair(~a)&&check_pair(~a.car)&&(~a).car.cdr" p p p)))
-	 (cddr 1
-	       ,(lambda (p) 
-		  (format "check_pair(~a)&&check_pair(~a.cdr)&&(~a).cdr.cdr" p p p)))
-	 (null? 1 "(~a)===theNIL")
-	 
-	 (symbol? 1 "typeof(~a)==='string'")
-	 (symbol->string 1 ,(lambda (s)
-			      (format "check_symbol(~a)&&new SchemeString(~a)" s s)))
-	 (string->symbol 1 ,(lambda (s)
-			      (format "check_string(~a)&&(~a).val" s s)))
-	 
-	 (char? 1 "(~a).constructor===SchemeChar")
-	 (char=? 2 ,(char-tester "==="))
-	 (char<? 2 ,(char-tester "<"))
-	 (char>? 2 ,(char-tester ">"))
-	 (char<=? 2 ,(char-tester "<="))
-	 (char>=? 2 ,(char-tester ">="))
-	 (char->integer 1 ,(lambda (c)
-			     (format "check_char(~a)&&(~a).val.charCodeAt(0)" c c)))
-	 (integer->char 1 
-			,(lambda (n)
-			   (format
-			    "check_integer(~a)&&intern_char(String.fromCharCode(~a))"
-			    n n)))
-	 
-	 (string? 1 "(~a).constructor===SchemeString")
-	 (string-length 1 ,(lambda (s)
-			     (format "check_string(~a)&&(~a).val.length" s s)))
-	 (string-ref 2 ,(lambda (s n)
-			  (format "check_string_and_len((~a),(~a))&&intern_char((~a).val.charAt(~a))" s n s n)))
-	 (string-set! 2 ,(lambda (s n c)
-			   (format "check_string_and_len((~a),(~a))&&check_char(~a)&&(~a).val=(~a).val.slice(0,(~a))+(~a).val+(~a).val.slice((~a)+1)&&\"string-set! undefined-value\"")
-			   s n c s s n c s n))
-	 (string=? 2 ,(lambda (s1 s2)
-			(format "check_string(~a)&&check_string(~a)&&(~a).val===(~a).val"
-				s1 s2 s1 s2)))
-	 (substring 3 ,(lambda (s start end)
-			 (format "check_integer(~a)&&check_string_and_len((~a),(~a))&&new SchemeString((~a).val.substring((~a),(~a)))"
-				 start s end s start end)))
-	 (string-copy 1 ,(lambda (s)
-			   (format "check_string(~a)&&new SchemeString((~a).val)"
-				   s s)))
+      ((pair? 1) "(~a).constructor===Pair")
+      ((cons 2)"new Pair(~a,~a)")
+      ((car 1) ,(lambda (p) (format "check_pair(~a)&&(~a).car" p p)))
+      ((cdr 1) ,(lambda (p) (format "check_pair(~a)&&(~a).cdr" p p)))
+      ((caar 1) 
+	    ,(lambda (p) 
+	       ((format "check_pair(~a)&&check_pair(~a.car)&&(~a).car.car" p p p)))
+      ((cadr 1)
+	    ,(lambda (p) 
+	       ((format "check_pair(~a)&&check_pair(~a.cdr)&&(~a).cdr.car" p p p)))
+      ((cdar 1)
+	    ,(lambda (p) 
+	       ((format "check_pair(~a)&&check_pair(~a.car)&&(~a).car.cdr" p p p)))
+      ((cddr 1)
+	    ,(lambda (p) 
+	       ((format "check_pair(~a)&&check_pair(~a.cdr)&&(~a).cdr.cdr" p p p)))
+      ((null? 1) "(~a)===theNIL")
+      
+      ((symbol? 1) "typeof(~a)==='string'")
+      ((symbol->string 1) ,(lambda (s)
+			   (format "check_symbol(~a)&&new SchemeString(~a)" s s)))
+      ((string->symbol 1) ,(lambda (s)
+			   (format "check_string(~a)&&(~a).val" s s)))
+      
+      ((char? 1) "(~a).constructor===SchemeChar")
+      ((char=? 2) ,(char-tester "==="))
+      ((char<? 2) ,(char-tester "<"))
+      ((char>? 2) ,(char-tester ">"))
+      ((char<=? 2) ,(char-tester "<="))
+      ((char>=? 2) ,(char-tester ">="))
+      ((char->integer 1) ,(lambda (c)
+			  (format "check_char(~a)&&(~a).val.charCodeAt(0)" c c)))
+      ((integer->char 1) 
+		     ,(lambda (n)
+			(format
+			 "check_integer(~a)&&intern_char(String.fromCharCode(~a))"
+			 n n)))
+      
+      ((string? 1) "(~a).constructor===SchemeString")
+      ((string-length 1) ,(lambda (s)
+			  (format "check_string(~a)&&(~a).val.length" s s)))
+      ((string-ref 2) ,(lambda (s n)
+		       ((format "check_string_and_len((~a),(~a))&&intern_char((~a).val.charAt(~a))" s n s n)))
+      ((string-set! 2) ,(lambda (s n c)
+			(format "check_string_and_len((~a),(~a))&&check_char(~a)&&(~a).val=(~a).val.slice(0,(~a))+(~a).val+(~a).val.slice((~a)+1)&&\"string-set! undefined-value\"")
+			s n c s s n c s n))
+      ((string=? 2) ,(lambda (s1 s2)
+		     (format "check_string(~a)&&check_string(~a)&&(~a).val===(~a).val"
+			     s1 s2 s1 s2)))
+      ((substring 3) ,(lambda (s start end)
+		      ((format "check_integer(~a)&&check_string_and_len((~a),(~a))&&new SchemeString((~a).val.substring((~a),(~a)))"
+			      start s end s start end)))
+      ((string-copy 1) ,(lambda (s)
+			(format "check_string(~a)&&new SchemeString((~a).val)"
+				s s)))
 
-	 (vector? 1 "(~a).constructor===Array")
-	 (vector-length 1 ,(lambda (v)
-			     (format "check_vector(~a)&&(~a).length")))
-	 (vector-ref 2 ,(lambda (v n)
-			  (format "check_vector_and_len((~a),(~a))&&(~a)[~a]"
-				  v n v n)))
-	 (vector-set! 3 ,(lambda (v n obj)
-			   (format "check_vector_and_len((~a),(~a))&&(~a)[~a]=(~a)&&\"vector-set! undefined value"
-				   v n v n obj)))
-	 
-	 (procedure? 1 "typeof(~a)==='function'")
+      ((vector? 1) "(~a).constructor===Array")
+      ((vector-length 1) ,(lambda (v)
+			  (format "check_vector(~a)&&(~a).length")))
+      ((vector-ref 2) ,(lambda (v n)
+		       ((format "check_vector_and_len((~a),(~a))&&(~a)[~a]"
+			       v n v n)))
+      ((vector-set! 3) ,(lambda (v n obj)
+			(format "check_vector_and_len((~a),(~a))&&(~a)[~a]=(~a)&&\"vector-set! undefined value"
+				v n v n obj)))
+      
+      ((procedure? 1) "typeof(~a)==='function'")
 
-	 (input-port? 1 "(~a).constructor===SchemeInputPort")
-	 (output-port? 1 "(~a).constructor===SchemeOutputPort")
-	 (current-input-port 0 "sinjs_current_input_port")
-	 (current-output-port 0 "sinjs_current_output_port")
-	 (eof-object? 1 "(~a)===theEOF"))))
+      ((input-port? 1) "(~a).constructor===SchemeInputPort")
+      ((output-port? 1) "(~a).constructor===SchemeOutputPort")
+      ((current-input-port 0) "sinjs_current_input_port")
+      ((current-output-port 0) "sinjs_current_output_port")
+      ((eof-object? 1) "(~a)===theEOF"))))
 
 (define (compile-form form)
 
   (define (compile-inlining procedure args)
     (case procedure
        
-      (else (error compile-inlining "bad inline procedure spec"))))
+      ((else (error compile-inlining "bad inline procedure spec"))))
 
   (define (compile-formals formals)
     (cond
