@@ -16,9 +16,9 @@
     (or (not global-set!s)
 	(memq name global-set!s)))
 
-  (define (inline-ok? name)
-    (and (memq name inlinables)
-	 (not (global-set? name))))
+  (define (inline-ok? name args)
+    (and (not (global-set? name))
+	 (assoc (list name (length args)) inlinables)))
 
   ;; We are considering beta-reducing EXPR; check if ACTUAL is an
   ;; acceptable actual parameter when expanded into FORMAL.
@@ -98,7 +98,7 @@
 	    ;; If the procedure is inlinable mark that for code-gen
 	    ((and (pair? procedure)
 		  (eq? (car procedure) 'top-level-ref)
-		  (inline-ok? (cadr procedure)))
+		  (inline-ok? (cadr procedure) (cdr args)))
 	     ;;; ((top-level-ref +) k a b) => (k ((INLINE +) a b))
 	     `(,(car args)
 	       ((,inline-tag ,(cadr procedure)) ,@(cdr args))))
