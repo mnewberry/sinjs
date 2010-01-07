@@ -166,10 +166,19 @@
 
 (define (compile-form form)
 
-  (define (compile-inlining procedure args)
-    (case procedure
-       
-      ((else (error compile-inlining "bad inline procedure spec"))))
+  (define (compile-inlining procedure args tmp-stream)
+    (cond 
+     ((assoc (list procedure (length args)) inlinables)
+      => (lambda (spec)
+	   (cond
+	    ((procedure? (cadr spec)) 
+	     (let ((tmps (n-names tmp-stream)))
+	       (apply string-append ... XXX)))
+	    ((string? (cadr spec)) (apply format (cadr spec) args))
+	    (else (error compile-inlining
+			 "bad inline procedure specification")))))
+     (else
+      (error compile-inlining "missing inline procedure specification"))))
 
   (define (compile-formals formals)
     (cond
@@ -229,7 +238,18 @@
 	  (string-append "x_" (string-filter legit? (symbol->string sym)))
 	  name)))
 
-  (define (compile-1 form)
+  (define (compile-temp-decls vars)
+    (if (null? vars)
+	""
+	(string-append "var " 
+		       (symbol->string (car vars))
+		       (apply string-append 
+			      (map (lambda (var)
+				     (string-append ", " var))
+				   (cdr vars)))
+		       ";\n")))
+
+  (define (compile-1 form tmp-stream)
     (cond
    ;;; variables become JS variables [note, these are all locals]
      ((symbol? form) (compile-identifier form))
@@ -240,7 +260,7 @@
 	 (let ((variable (cadr form))
 	       (value (caddr form)))
 	   (string-append (compile-identifier variable) "=(" 
-			  (compile-1 value) ")")))
+			  (compile-1 value tmp-stream) ")")))
 
 	((quote)
 	 (compile-literal (cadr form)))
@@ -249,7 +269,7 @@
 	 (let ((variable (cadr form))
 	       (value (caddr form)))
 	   (string-append "top_level_binding['" (symbol->string variable)
-			  "']=(" (compile-1 value) ")")))
+			  "']=(" (compile-1 value tmp-stream) ")")))
 
 	((top-level-ref)
 	 (let ((variable (cadr form)))
@@ -260,25 +280,34 @@
 	 (let ((test (cadr form))
 	       (true-branch (caddr form))
 	       (false-branch (cadddr form)))
-	   (string-append "(" (compile-1 test) ")!=false?(" 
-			  (compile-1 true-branch) "):(" 
-			  (compile-1 false-branch) ")")))
+	   (string-append "(" (compile-1 test tmp-stream) ")!=false?(" 
+			  (compile-1 true-branch tmp-stream) "):(" 
+			  (compile-1 false-branch tmp-stream) ")")))
 
 	((lambda)
 	 (let ((formals (cadr form))
 	       (expression (caddr form)))
 	   (unless (null? (cdddr form))
 	     (error "implicit begin not supported in code generation\n"))
-	   (if (list? formals)
-	       (string-append "function (" (compile-formals formals) 
-			      "){return function () {return " (compile-1 expression) ";};}")
-	       (let ((rest-var (take-right formals 0))
-		     (main-vars (drop-right formals 0)))
-		 (string-append "function (" (compile-formals main-vars) "){"
-				(compile-identifier rest-var)
-				"=sinjs_restify(arguments,"
-				(number->string (length main-vars))
-				"); return function () {return " (compile-1 expression) "};}")))))
+	   (let-values (((tmpnames new-tmp-stream) 
+			 (count-inline-temps (caddr form))))
+	     (if (list? formals)
+		 (string-append "function (" (compile-formals formals) 
+				"){return function () {"
+				(compile-temp-decls tmpnames)
+				"return " 
+				(compile-1 expression new-tmp-stream) ";};}")
+		 (let ((rest-var (take-right formals 0))
+		       (main-vars (drop-right formals 0)))
+		   (string-append "function (" (compile-formals main-vars) "){"
+				  (compile-identifier rest-var)
+				  "=sinjs_restify(arguments,"
+				  (number->string (length main-vars))
+				  "); return function () {"
+				  (compile-temp-decls tmpnames)
+				  "return " 
+				  (compile-1 expression new-tmp-stream)
+				  "};}"))))))
 
 	(else
 	 (cond
@@ -289,12 +318,64 @@
 
 	  ((and (pair? (car form))
 		(eq? (caar form) inline-tag))
-	   (compile-inlining (cadar form) (cdr form)))
+	   (compile-inlining (cadar form) (cdr form) tmp-stream))
 
 	  (else
-	   (string-append "(" (compile-1 (car form)) ")(" 
+	   (string-append "(" (compile-1 (car form) tmp-stream) ")(" 
 			  (compile-arguments (cdr form)) ")"))))))
      (else (error (format "unknown expression ~s\n" form)))))
 
-  (compile-1 form))
+  (compile-1 form #f))
+
+;;; Scan FORM and return a count of tmp variable names needed for use
+;;; inside its inline procedures.  A tmp variable name is
+;;; (potentially) required for each inline argument where the inline
+;;; is specified by a lambda (as opposed to format string).
+(define (count-inline-temps form)
+  (if (pair? form)
+      (case (car form)
+	((set! top-level-set!) (count-inline-temps (caddr form)))
+	((quote top-level-ref) 0)
+	((if) (+ (count-inline-temps (cadr form))
+		 (count-inline-temps (caddr form))
+		 (count-inline-temps (cadddr form))))
+	((lambda) 0)			;will get its own inline temps, see?
+	(else
+	 (cond
+	  ((eq? (car form) inline-tag)
+	   (error count-inline-temps "inline procedure tag escaped"))
+	  ((and (pair? (car form))
+		(eq? (caar form) inline-tag))
+	   (let ((spec (assoc (list (cadar form) (length (cdr form))))))
+	     (cond
+	      ((not spec) 
+	       (error count-inline-temps 
+		      "missing inline procedure specification"))
+	      ((procedure? (cadr spec)) 
+	       (apply + 
+		      (length (cdr form)) 
+		      (map count-inline-temps (cdr form))))
+	      ((string? (cadr spec))
+	       (apply + (map count-inline-temps (cdr form))))
+	      (else (error count-inline-temps "bad inline procedure spec")))))
+	  (else (apply + (map count-inline-temps form))))))
+      0))
+
+;;; make an inline temps stream for N temps; return two values:
+;;; the stream, and the list of names.
+(define (make-inline-temps n)
+  (let ((vars (map uniquify (make-list n 'tmp))))
+    (values vars 
+	    (lambda ()
+	      (if (null? vars)
+		  (error tmp-stream "ran out of temporary variables")
+		  (let ((var (car vars)))
+		    (set! vars (cdr vars))
+		    var))))))
+
+;;; return a list of N names from stream
+(define (n-names n stream)
+  (if (= n 0)
+      '()
+      (cons (stream) (n-names (- n 1) stream))))
 
