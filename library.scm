@@ -310,7 +310,7 @@
 		  ub
 		  (let ((midpoint (if (even? (- ub lb))
 				      (+ lb (/ (- ub lb) 2))
-				      (+ lb (/ (- ub lb) 2) -0.15))))
+				      (+ lb (/ (- ub lb) 2) -0.5))))
 		    (if (integer? (* q midpoint))
 			(next-search lb midpoint)
 			(next-search midpoint ub)))))
