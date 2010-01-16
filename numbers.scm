@@ -1,15 +1,14 @@
 ;;; Numbers in sinjs
 ;;;
 ;;; The following numeric formats exist:
-;;;    quatnum   q:
-;;;    flonum    flo:
-;;;    fracnum   frac:
-;;;    bignum	 big:
-;;;    fixnum    fix:
+;;;    quatnum   q:	[quaternians as four components]
+;;;    flonum    flo:	[floating point real]
+;;;    fracnum   frac:  [exact rational as pair of integers]
+;;;    bignum	 big:   [infinite precision integer]
+;;;    fixnum    fix:   [limited precision integer]
 
 
-;;; The following numeric types exist.  Note that a number is often
-;;; part of more than one type, though only of a single format.
+;;; The following numeric types exist, with corresponding functions.
 ;;;    quaternion	  quaternion:		T       
 ;;;    real		  real:			X, Y    
 ;;;    (exact) rational   rational:		Q
@@ -18,11 +17,22 @@
 ;;; For each format and type there is a prefix used on symbols which
 ;;; conventionally identifies the domain of arguments.
 
-;;; Builtin primitives:
-;;; Quatnum format: q:real-part q:imag-part q:jmag-part q:kmap-part
-;;;                 quatnum? make-quatnum
-;;;   number?
+;;; Primitives:
 
+;;; number?
+;;; q:real-part q:imag-part q:jmag-part q:kmap-part quatnum? make-quatnum
+;;; flo:= flo:->rational flo:< flo:> flo:<= flo:>= flo:zero? flo:positive?
+;;; flo:negative? flo:->rational flo:+ flo:* flo:- flo:negate flo:/
+;;; flo:reciprocal flo:abs flo:numerator flo:denominator flo:floor flo:ceiling
+;;; flo:truncate flo:round flo:exp flo:log flo:sin flo:cos flo:tan flo:tan2
+;;; flo:asin flo:acos flo:atan flo:sqrt flo:expt flonum?
+;;; frac:numerator frac:denominator make-frac fracnum?
+;;; big:= big:< big:> big:<= big:>= big:negative? big:positive? big:even?
+;;; big:+ big:* big:negate big:- big:abs big:quotient big:remainder big:modulo 
+;;; fix:->bignum bignum?
+;;; fix:= fix:< fix:> fix:<= fix:>= fix:zero? fix:positive? fix:negative?
+;;; fix:even? fix:+ fix:* fix:negate fix:- fix:abs fix:quotient fixnum?
+;;; fix:remainder fix:modulo 
 ;;;
 ;;; Quaternion arithmetic
 ;;;
@@ -72,6 +82,22 @@
 	       (zero? (q:kmag-part t2))
 	       (real:= (q:imag-part t2) (complex:imag-part t1)))
 	  (real:= t1 t2))))
+
+(define (quaternion:< t1 t2)
+  (real:< (quaternion:real-arg t1 '<)
+	  (quaternion:real-arg t2 '<)))
+
+(define (quaternion:> t1 t2)
+  (real:> (quaternion:real-arg t1 '>)
+	  (quaternion:real-arg t2 '>)))
+
+(define (quaternion:<= t1 t2)
+  (real:<= (quaternion:real-arg t1 '<=)
+	  (quaternion:real-arg t2 '<=)))
+
+(define (quaternion:>= t1 t2)
+  (real:>= (quaternion:real-arg t1 '>=)
+	  (quaternion:real-arg t2 '>=)))
 
 (define (quaternion:zero? t)
   (if (quatnum? t)
@@ -327,10 +353,12 @@
   (if (and (real:zero? imag)
 	   (real:zero? jmag)
 	   (real:zero? kmag))
-      (if (or (real:inexact? imag)
-	      (real:inexact? jmag)
-	      (real:inexact? kmag))
-	  (real:exact->inexact real)
+      (if (real:exact? real)
+	  (if (and (real:exact? imag)
+		   (real:exact? jmag)
+		   (real:exact? kmag))
+	      real
+	      (real:exact->inexact real))
 	  real)
       (make-quatnum real imag jmag kmag)))
 
@@ -401,6 +429,57 @@
 		    (real:reciprocal (quaternion:magnitude t)))
       0))
 
+(define (quaternion:dot-product t1 t2)
+  (if (quatnum? t1)
+      (if (quatnum? t2)
+	  (if (real:zero? (q:real-part t1))
+	      (if (real:zero? q:real-part t2)
+		  (real:negate 
+		   (quaternion:real-part (quaternion:* t1 t2)))
+		  (num-error 'dot-product "vector quaternion" t2))
+	      (num-error 'dot-product "vector quaternion" t1))
+	  (if (real:zero? t2)
+	      t2
+	      (num-error 'dot-product "vector quaternion" t2)))
+      (if (quatnum? t2)
+	  (if (real:zero? t1)
+	      t1
+	      (num-error 'dot-product "vector quaternion" t1))
+	  (if (real:zero? t1)
+	      (if (real:zero? t2)
+		  (if (real:exact? t1) t2 t1)
+		  (num-error 'dot-product "vector quaternion" t2))
+	      (num-error 'dot-product "vector quaternion" t1)))))
+
+(define (quaternion:cross-product t1 t2)
+  (if (quatnum? t1)
+      (if (quatnum? t2)
+	  (if (real:zero? (q:real-part t1))
+	      (if (real:zero? q:real-part t2)
+		  (quaternion:vector-part (quaternion:* t1 t2)))
+		  (num-error 'cross-product "vector quaternion" t2))
+	      (num-error 'cross-product "vector quaternion" t1))
+	  (if (real:zero? t2)
+	      t2
+	      (num-error 'cross-product "vector quaternion" t2)))
+      (if (quatnum? t2)
+	  (if (real:zero? t1)
+	      t1
+	      (num-error 'cross-product "vector quaternion" t1))
+	  (if (real:zero? t1)
+	      (if (real:zero? t2)
+		  (if (real:exact? t1) t2 t1)
+		  (num-error 'cross-product "vector quaternion" t2))
+	      (num-error 'cross-product "vector quaternion" t1)))))
+
+(define (quaternion:conjugate t)
+  (if (quatnum? t)
+      (make-rectangular* (q:real-part t)
+			 (real:negate (q:imag-part t))
+			 (real:negate (q:jmag-part t))
+			 (real:negate (q:kmag-part t)))
+      t))
+
 (define (quaternion:exact->inexact t)
   (if (quatnum? t)
       (make-rectangular* (real:exact->inexact (q:real-part t))
@@ -417,13 +496,11 @@
 			 (real:inexact->exact (q:kmag-part t)))
       (real:inexact->exact t)))
 
+;;; note that we never allow non-normalized quatnums to escape;
+;;; see the logic in make-rectangular*.
 (define (quaternion:real-arg t name)
   (if (quatnum? t)
-      (if (and (real:zero? (q:imag-part t))
-	       (real:zero? (q:jmag-part t))
-	       (real:zero? (q:kmag-part t)))
-	  (q:real-part t)
-	  (num-error name "real number" t))
+      (num-error name "real number" t)
       t))
 
 ;;;
@@ -453,10 +530,37 @@
   (if (flonum? x1)
       (if (flonum? x2)
 	  (flo:< x1 x2)
-	  (rational:< (flo:->ratnum x1) x2))
+	  (rational:< (flo:->rational x1) x2))
       (if (flonum? x2)
-	  (rational:< x1 (flo:->ratnum x2))
+	  (rational:< x1 (flo:->rational x2))
 	  (rational:< x1 x2))))
+
+(define (real:> x1 x2)
+  (if (flonum? x1)
+      (if (flonum? x2)
+	  (flo:> x1 x2)
+	  (rational:> (flo:->rational x1) x2))
+      (if (flonum? x2)
+	  (rational:> x1 (flo:->rational x2))
+	  (rational:> x1 x2))))
+
+(define (real:<= x1 x2)
+  (if (flonum? x1)
+      (if (flonum? x2)
+	  (flo:<= x1 x2)
+	  (rational:<= (flo:->rational x1) x2))
+      (if (flonum? x2)
+	  (rational:<= x1 (flo:->rational x2))
+	  (rational:<= x1 x2))))
+
+(define (real:>= x1 x2)
+  (if (flonum? x1)
+      (if (flonum? x2)
+	  (flo:>= x1 x2)
+	  (rational:>= (flo:->rational x1) x2))
+      (if (flonum? x2)
+	  (rational:>= x1 (flo:->rational x2))
+	  (rational:>= x1 x2))))
 
 (define (real:zero? x)
   (if (flonum? x)
@@ -723,6 +827,36 @@
 	  (integer:< (integer:* q1 (frac:denominator q2)) (frac:numerator q2))
 	  (integer:< q1 q2))))
 
+(define (rational:> q1 q2)
+  (if (fracnum? q1)
+      (if (fracnum? q2)
+	  (integer:> (integer:* (frac:numerator q1) (frac:denominator q2))
+		     (integer:* (frac:numerator q2) (frac:denominator q1)))
+	  (integer:> (frac:numerator q1) (integer:* q2 (frac:denominator q1))))
+      (if (fracnum? q2)
+	  (integer:> (integer:* q1 (frac:denominator q2)) (frac:numerator q2))
+	  (integer:> q1 q2))))
+
+(define (rational:<= q1 q2)
+  (if (fracnum? q1)
+      (if (fracnum? q2)
+	  (integer:<= (integer:* (frac:numerator q1) (frac:denominator q2))
+		     (integer:* (frac:numerator q2) (frac:denominator q1)))
+	  (integer:<= (frac:numerator q1) (integer:* q2 (frac:denominator q1))))
+      (if (fracnum? q2)
+	  (integer:<= (integer:* q1 (frac:denominator q2)) (frac:numerator q2))
+	  (integer:<= q1 q2))))
+
+(define (rational:>= q1 q2)
+  (if (fracnum? q1)
+      (if (fracnum? q2)
+	  (integer:>= (integer:* (frac:numerator q1) (frac:denominator q2))
+		     (integer:* (frac:numerator q2) (frac:denominator q1)))
+	  (integer:>= (frac:numerator q1) (integer:* q2 (frac:denominator q1))))
+      (if (fracnum? q2)
+	  (integer:>= (integer:* q1 (frac:denominator q2)) (frac:numerator q2))
+	  (integer:>= q1 q2))))
+
 (define (rational:zero? q)
   (and (not (fracnum? q))
        (integer:zero? q)))
@@ -806,12 +940,16 @@
       (if (fracnum? q2)
 	  (quotient* (integer:* (frac:numerator q1) (frac:denominator q2))
 		     (integer:* (frac:denominator q1) (frac:numerator q2)))
-	  (quotient* (frac:numerator q1)
-		     (integer:* (frac:denominator q1) q2)))
+	  (if (integer:zero? q2)
+	      (num-error '/ "division by zero")
+	      (quotient* (frac:numerator q1)
+			 (integer:* (frac:denominator q1) q2))))
       (if (fracnum? q2)
 	  (quotient* (integer:* q1 (frac:denominator q2))
 		     (frac:numerator q2))
-	  (quotient* q1 q2))))
+	  (if (integer:zero? q2)
+	      (num-error '/ "division by zero")
+	      (quotient* q1 q2)))))
 
 (define (rational:abs q)
   (if (fracnum? q)
@@ -902,3 +1040,403 @@
 (define (rational:expt q1 q2)
   xxx)
 
+(define (rational:->flonum q)
+  (if (fracnum? q)
+      ;;xxx violates r5rs b/c overflow could kill us
+      (flo:/ (integer:->flonum (frac:numerator q))
+	     (integer:->flonum (frac:denominator q)))
+      (integer:->flonum q)))
+
+(define (quotient* n1 n2)
+  (if (integer:zero? n1)
+      0
+      (let* ((g (integer:gcd n1 n2))
+	     (n (integer:quotient n1 g))
+	     (d (integer:quotient n2 g)))
+	(if (integer:= d 1)
+	    n
+	    (if (integer:negative? d)
+		(make-frac (integer:negate n) (integer:negate d))
+		(make-frac n d))))))
+
+;;;
+;;; Integer arithmetic
+;;;
+;;; Much depends here that bignums are always normalized,
+;;; and there is no overlap between normalized bignums and fixnums,
+;;; and every bignum has larger absolute value than every fixnum.
+;;;
+;;; Note that fix operations are unusual in that they can fail:
+;;; if they do, they return #f, and this is the signal to promote to
+;;; bignum operations.
+
+(define (integer:= n1 n2)
+  (if (bignum? n1)
+      (if (bignum? n2)
+	  (big:= n1 n2)
+	  #f)
+      (if (bignum? n2)
+	  #f
+	  (fix:= n1 n2))))
+
+(define (integer:< n1 n2)
+  (if (bignum? n1)
+      (if (bignum? n2)
+	  (big:< n1 n2)
+	  (big:negative? n1))
+      (if (bignum? n2)
+	  (big:positive? n2)
+	  (fix:< n1 n2))))
+
+(define (integer:> n1 n2)
+  (if (bignum? n1)
+      (if (bignum? n2)
+	  (big:> n1 n2)
+	  (big:negative? n1))
+      (if (bignum? n2)
+	  (big:positive? n2)
+	  (fix:> n1 n2))))
+
+(define (integer:<= n1 n2)
+  (if (bignum? n1)
+      (if (bignum? n2)
+	  (big:<= n1 n2)
+	  (big:negative? n1))
+      (if (bignum? n2)
+	  (big:positive? n2)
+	  (fix:<= n1 n2))))
+
+(define (integer:>= n1 n2)
+  (if (bignum? n1)
+      (if (bignum? n2)
+	  (big:>= n1 n2)
+	  (big:negative? n1))
+      (if (bignum? n2)
+	  (big:positive? n2)
+	  (fix:>= n1 n2))))
+
+(define (integer:zero? n)
+  (if (bignum? n)
+      #f
+      (fix:zero? n)))
+
+(define (integer:positive? n)
+  (if (bignum? n)
+      (big:positive? n)
+      (fix:positive? n)))
+
+(define (integer:negative? n)
+  (if (bignum? n)
+      (big:negative? n)
+      (fix:negative? n)))
+
+(define (integer:even? n)
+  (if (bignum? n)
+      (big:even? n)
+      (fix:even? n)))
+
+(define (integer:+ n1 n2)
+  (if (bignum? n1)
+      (if (bignum? n2)
+	  (big:+ n1 n2)
+	  (big:+ n1 (fix:->bignum n2)))
+      (if (bignum? n2)
+	  (big:+ (fix:->bignum n1) n2)
+	  (or (fix:+ n1 n2)
+	      (big:+ (fix:->bignum n1) (fix:->bignum n2))))))
+
+(define (integer:* n1 n2)
+  (if (bignum? n1)
+      (if (bignum? n2)
+	  (big:* n1 n2)
+	  (big:* n1 (fix:->bignum n2)))
+      (if (bignum? n2)
+	  (big:* (fix:->bignum n1) n2)
+	  (or (fix:* n1 n2)
+	      (big:* (fix:->bignum n1) (fix:->bignum n2))))))
+
+(define (integer:negate n)
+  (if (bignum? n)
+      (big:negate n)
+      (fix:negate n)))
+
+(define (integer:- n1 n2)
+  (if (bignum? n1)
+      (if (bignum? n2)
+	  (big:- n1 n2)
+	  (big:- n1 (fix:->bignum n2)))
+      (if (bignum? n2)
+	  (big:- (fix:-> bignum n1) n2)
+	  (or (fix:- n1 n2)
+	      (big:- (fix:->bignum n1) (fix:->bignum n2))))))
+
+(define (integer:abs n)
+  (if (bignum? n)
+      (big:abs n)
+      (fix:abs n)))
+
+(define (integer:quotient n1 n2)
+  (if (bignum? n1)
+      (if (bignum? n2)
+	  (big:quotient n1 n2)
+	  (big:quotient n1 (fix:->bignum n2)))
+      (if (bignum? n2)
+	  (big:quotient (fix:->bignum n1) n2)
+	  (fix:quotient n1 n2))))	;fix:quotient can't fail
+
+(define (integer:remainder n1 n2)
+  (if (bignum? n1)
+      (if (bignum? n2)
+	  (big:remainder n1 n2)
+	  (big:remainder n1 (fix:->bignum n2)))
+      (if (bignum? n2)
+	  (big:remainder (fix:->bignum n1) n2)
+	  (fix:remainder n1 n2))))	;can't fail
+
+(define (integer:modulo n1 n2)
+  (if (bignum? n1)
+      (if (bignum? n2)
+	  (big:modulo n1 n2)
+	  (big:modulo n1 (fix:->bignum n2)))
+      (if (bignum? n2)
+	  (big:modulo (fix:->bignum n1) n2)
+	  (fix:modulo n1 n2))))		;can't fail
+
+(define (integer:gcd n1 n2)
+  (if (integer:zero? n2)
+      (integer:abs n1)
+      (integer:gcd n2 (integer:remainder n1 n2))))
+
+(define (integer:lcm n1 n2)
+  (integer:* (integer:quotient (integer:abs n1)
+			       (integer:gcd n1 n2))
+	     (integer:abs n2)))
+
+;;;
+;;; R5RS
+;;;
+;;; Generic arithmetic
+
+;;; number? is builtin
+
+(define quaternion? number?)
+(define (complex? obj)
+  (and (number? obj)
+       (quaternion:complex? obj)))
+(define (real? obj)
+  (and (number? obj)
+       (quaternion:real? obj)))
+(define rational? real?)
+(define (integer? obj)
+  (and (number? obj)
+       (quaternion:integer? obj)))
+
+(define exact? quaternion:exact?)
+(define (inexact? t) (not (quaternion:inexact? t)))
+
+(define =
+  (case-lambda
+   ((t1 t2) (quaternion:= t1 t2))
+   ((t1 t2 t3) (and (quaternion:= t1 t2)
+		    (quaternion:= t2 t3)))
+   ((t1 t2 t3 . ts) (and (quaternion:= t1 t2)
+			 (quaternion:= t2 t3)
+			 (apply = t3 ts)))))
+
+(define <
+  (case-lambda
+   ((t1 t2) (quaternion:< t1 t2))
+   ((t1 t2 t3) (and (quaternion:< t1 t2)
+		    (quaternion:< t2 t3)))
+   ((t1 t2 t3 . ts) (and (quaternion:< t1 t2)
+			 (quaternion:< t2 t3)
+			 (apply < t3 ts)))))
+
+(define >
+  (case-lambda
+   ((t1 t2) (quaternion:> t1 t2))
+   ((t1 t2 t3) (and (quaternion:> t1 t2)
+		    (quaternion:> t2 t3)))
+   ((t1 t2 t3 . ts) (and (quaternion:> t1 t2)
+			 (quaternion:> t2 t3)
+			 (apply > t3 ts)))))
+
+(define <=
+  (case-lambda
+   ((t1 t2) (quaternion:<= t1 t2))
+   ((t1 t2 t3) (and (quaternion:<= t1 t2)
+		    (quaternion:<= t2 t3)))
+   ((t1 t2 t3 . ts) (and (quaternion:<= t1 t2)
+			 (quaternion:<= t2 t3)
+			 (apply <= t3 ts)))))
+
+(define >=
+  (case-lambda
+   ((t1 t2) (quaternion:>= t1 t2))
+   ((t1 t2 t3) (and (quaternion:>= t1 t2)
+		    (quaternion:>= t2 t3)))
+   ((t1 t2 t3 . ts) (and (quaternion:>= t1 t2)
+			 (quaternion:>= t2 t3)
+			 (apply >= t3 ts)))))
+
+(define zero? quaternion:zero?)
+(define positive? quaternion:positive?)
+(define negative? quaternion:negative?)
+(define (odd? n) (not (quaternion:even? n)))
+(define even? quaternion:even?)
+
+(define max
+  (case-lambda
+   ((x) x)
+   ((x y) (if (> x y)
+	      (if (inexact? y) (exact->inexact x) x)
+	      (if (inexact? x) (exact->inexact y) y)))
+   ((x y . zs)
+    (if (> x y)
+	(if (inexact? y) 
+	    (apply max (exact->inexact x) zs)
+	    (apply max x zs))
+	(if (inexact? x)
+	    (apply max (exact->inexact y) zs)
+	    (apply max y zs))))))
+
+(define min
+  (case-lambda
+   ((x) x)
+   ((x y) (if (< x y)
+	      (if (inexact? y) (exact->inexact x) x)
+	      (if (inexact? x) (exact->inexact y) y)))
+   ((x y . zs)
+    (if (< x y)
+	(if (inexact? y) 
+	    (apply min (exact->inexact x) zs)
+	    (apply min x zs))
+	(if (inexact? x)
+	    (apply min (exact->inexact y) zs)
+	    (apply min y zs))))))
+
+(define +
+  (case-lambda
+   (() 0)
+   ((z) z)
+   ((z1 z2) (quaternion:+ z1 z2))
+   ((z1 z2 z3) (quaternion:+ (quaternion:+ z1 z2) z3))
+   ((z1 z2 . zs) (apply + (quaternion:+ z1 z2) zs))))
+
+(define *
+  (case-lambda
+   (() 1)
+   ((z) z)
+   ((z1 z2) (quaternion:* z1 z2))
+   ((z1 z2 z3) (quaternion:* (quaternion:* z1 z2) z3))
+   ((z1 z2 . zs) (apply * (quaternion:* z1 z2) zs))))
+
+(define -
+  (case-lambda
+   ((z) (quaternion:negate z))
+   ((z1 z2) (quaternion:- z1 z2))
+   ((z1 z2 z3) (quaternion:- (quaternion:- z1 z2) z3))
+   ((z1 z2 . zs) (apply - (quaternion:- z1 z2) zs))))
+
+(define /
+  (case-lambda
+   ((z) (quaternion:reciprocal z))
+   ((z1 z2) (quaternion:/ z1 z2))
+   ((z1 z2 z3) (quaternion:/ (quaternion:/ z1 z2) z3))
+   ((z1 z2 . zs) (apply / (quaternion:/ z1 z2) zs))))
+
+(define abs quaternion:abs)
+(define quotient quaternion:quotient)
+(define remainder quaternion:remainder)
+(define modulo quaternion:modulo)
+
+(define gcd
+  (case-lambda
+   (() 0)
+   ((n) n)
+   ((n1 n2) (quaternion:gcd n1 n2))
+   ((n1 n2 n3) (quaternion:gcd (quaternion:gcd n1 n2) n3))
+   ((n1 n2 . n3) (apply gcd (quaternion:gcd n1 n2) n3))))
+
+(define lcm
+  (case-lambda
+   (() 1)
+   ((n) n)
+   ((n1 n2) (quaternion:lcm n1 n2))
+   ((n1 n2 n3) (quaternion:lcm (quaternion:lcm n1 n2) n3))
+   ((n1 n2 . n3) (apply lcm (quaternion:lcm n1 n2) n3))))
+
+(define numerator quaternion:numerator)
+(define denominator quaternion:denominator)
+(define floor quaternion:floor)
+(define ceiling quaternion:ceiling)
+(define truncate quaternion:truncate)
+(define round quaternion:round)
+(define exp quaternion:exp)
+(define log quaternion:log)
+(define sin quaternion:sin)
+(define cos quaternion:cos)
+(define tan quaternion:tan)
+(define asin quaternion:asin)
+(define acos quaternion:acos)
+(define atan
+  (case-lambda
+   ((x) (quaternion:atan x))
+   ((x y) (quaternion:angle 
+	   (make-rectangular* (quaternion:real-arg x 'tan)
+			      (quaternion:real-arg y 'tan)
+			      0
+			      0)))))
+(define sqrt quaternion:sqrt)
+(define expt quaternion:expt)
+
+(define make-rectangular
+  (case-lambda
+   ((real imag)
+    (make-rectangular* (quaternion:real-arg real 'make-rectangular)
+		       (quaternion:real-arg imag 'make-rectangular)
+		       0
+		       0))
+   ((real imag jmag kmag)
+    (make-rectangular* (quaternion:real-arg real 'make-rectangular)
+		       (quaternion:real-arg imag 'make-rectangular)
+		       (quaternion:real-arg jmag 'make-rectangular)
+		       (quaternion:real-arg kmag 'make-rectangular)))))
+
+(define make-polar
+  (case-lambda
+   ((mag angle)
+    (make-rectangular* (real:* mag (real:cos angle))
+		       (real:* mag (real:sin angle))
+		       0
+		       0))
+   ((mag angle colat long)
+    (make-rectangular* (real:* mag (real:cos angle))
+		       (real:* mag (real:* (real:sin angle)
+					   (real:cos colat)))
+		       (real:* (real:* mag (real:sin angle))
+			       (real:* (real:sin colat) (real:cos long)))
+		       (real:* (real:* mag (real:sin angle))
+			       (real:* (real:sin colat) (real:sin long)))))))
+
+(define real-part quaternion:real-part)
+(define imag-part quaternion:imag-part)
+(define magnitude quaternion:magnitude)
+(define angle quaternion:angle)
+
+(define exact->inexact quaternion:exact->inexact)
+(define inexact->exact quaternion:inexact->exact)
+
+;;;
+;;; New functions for quaternions
+;;;
+
+(define jmag-part quaternion:jmag-part)
+(define kmag-part quaternion:kmag-part)
+(define colatitude quaternion:colatitude)
+(define longitude quaternion:longitude)
+(define vector-part quaternion:vector-part)
+(define unit-vector quaternion:unit-vector)
+(define dot-product quaternion:dot-product)
+(define cross-product quaternion:cross-product)
+(define conjugate quaternion:conjugate)
