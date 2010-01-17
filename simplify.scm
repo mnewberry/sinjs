@@ -2,10 +2,6 @@
 
 (use (srfi 1))
 
-;;; Codegen has a list of inlinable procedures, and here we create
-;;; a new expression type which codegen uses to emit those calls.
-(define inline-tag (cons 'inlinable 'tag))
-
 ;;; if global-set!s is #f, then make no assumptions about global
 ;;; assignments.
 (define (simplify form global-set!s local-set!s)
@@ -15,10 +11,6 @@
   (define (global-set? name)
     (or (not global-set!s)
 	(memq name global-set!s)))
-
-  (define (inline-ok? name args)
-    (and (not (global-set? name))
-	 (assoc (list name (length args)) inlinables)))
 
   ;; We are considering beta-reducing EXPR; check if ACTUAL is an
   ;; acceptable actual parameter when expanded into FORMAL.
@@ -50,6 +42,11 @@
 	((quote) form)
 	((top-level-ref) form)
 
+	((foreign-inline)
+	 (let ((code (cadr form))
+	       (args (cddr form)))
+	   `(foreign-inline ,code ,@(map simplify-1 args))))
+
 	((set!) 
 	 (let ((var (cadr form))
 	       (val (caddr form)))
@@ -77,10 +74,6 @@
 	 (let ((procedure (car form))
 	       (args (cdr form)))
 	   (cond
-	    ;; Not really a procedure, but an (INLINE foo) special form
-	    ((and (eq? procedure inline-tag))
-	     form)
-
 	    ;; if the operator position is a literal procedure, perhaps
 	    ;; we can do a beta reduction.
 	    ((and (list? procedure)
@@ -95,14 +88,6 @@
 	     (beta-reduce (caddr procedure) 
 			  (map cons (cadr procedure) args)))
 	    
-	    ;; If the procedure is inlinable mark that for code-gen
-	    ((and (pair? procedure)
-		  (eq? (car procedure) 'top-level-ref)
-		  (inline-ok? (cadr procedure) (cdr args)))
-	     ;;; ((top-level-ref +) k a b) => (k ((INLINE +) a b))
-	     `(,(car args)
-	       ((,inline-tag ,(cadr procedure)) ,@(cdr args))))
-
 	    (else (map simplify-1 form)))))))))
 
   (let ((f (simplify-1 form)))
@@ -146,11 +131,11 @@
 ;; also return true if SYMBOL is assigned anywhere in EXPR.
 (define (captured? symbol expr)
   (cond
-   ((eq? expr inline-tag) #f)
    ((symbol? expr) #f)
    ((pair? expr)
     (case (car expr)
       ((quote) #f)
+      ((foreign-inline) (any (cut captured? symbol <>) (cddr expr)))
       ((set!) (or (eq? symbol (cadr expr))
 		  (captured? symbol (caddr expr))))
       ((top-level-ref) #f)
@@ -166,12 +151,12 @@
 ;;; return true if SYMBOL is used or assigned anywhere in EXPR
 (define (used? symbol expr)
   (cond
-   ((eq? expr inline-tag) #f)
    ((and (symbol? expr)
 	 (eq? symbol expr)) #t)
    ((pair? expr)
     (case (car expr)
       ((quote) #f)
+      ((foreign-inline) (any (cut used? symbol <>) (cddr expr)))
       ((set!) (or (eq? symbol (cadr expr))
 		  (used? symbol (caddr expr))))
       ((top-level-ref) (eq? symbol (cadr expr)))
@@ -187,12 +172,12 @@
 ;; is VAR set within EXPR?
 (define (setwithin? var expr)
   (cond
-   ((eq? expr inline-tag) #f)
    ((symbol? expr) #f)
    ((pair? expr)
     (case (car expr)
       ((quote) #f)
       ((top-level-ref) #f)
+      ((foreign-inline) (any (cut setwithin? var <>) (cddr expr)))
       ((set!) (or (eq? var (cadr expr))
 		  (setwithin? var (caddr expr))))
       ((top-level-set!) (or (eq? var (cadr expr))
@@ -206,12 +191,14 @@
 ;;; Actually reduce FORM with variable->value pairs in the alist MAPPINGS
 (define (beta-reduce form mappings)
   (cond
-   ((eq? form inline-tag) form)
    ((assq form mappings) => cdr)
    ((symbol? form) form)
    ((pair? form)
     (case (car form)
       ((quote) form)
+      ((foreign-inline) form
+       `(foreign-inline ,(cadr form)
+			,@(map (cut beta-reduce <> mappings) (cddr form))))
       ((set!) (if (assq (cadr form) mappings)
 		  (error "set! in beta reduction")
 		  `(set! ,(cadr form) 

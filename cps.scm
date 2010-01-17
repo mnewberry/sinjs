@@ -7,7 +7,7 @@
 ;;;   All variable names are globally unique.
 ;;;   IF expressions are double-branched.
 ;;; The following special forms are allowed in input:
-;;;   QUOTE SET! IF LAMBDA TOP-LEVEL-REF TOP-LEVEL-SET! BEGIN
+;;;   QUOTE SET! IF LAMBDA TOP-LEVEL-REF TOP-LEVEL-SET! BEGIN FOREIGN-INLINE
 
 ;;; When we have completed, all continuations have been fully exposed,
 ;;; and the code observes the following constraints:
@@ -28,6 +28,13 @@
     (case (car form)
       ((quote) `(,k ,form))
       ((top-level-ref) `(,k ,form))
+
+      ((foreign-inline)
+       (let* ((code (cadr form))
+	      (args (cddr form))
+	      (temps (map (lambda ignored (uniquify 't)) args)))
+	 (cps-transform-combination args temps
+				    `(,k (foreign-inline ,code ,@temps)))))
 
       ((set!)
        (let ((var (cadr form))

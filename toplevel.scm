@@ -134,6 +134,7 @@
 		(values global (cons (cadr form) local))))
       ((begin) (find-modifications (cdr form)))
       ((lambda) (find-modifications (cddr form)))
+      ((foreign-inline) (find-modifications (cddr form)))
       ((top-level-set!) (let-values (((global local)
 				      (find-modifications (caddr form))))
 			  (values (cons (cadr form) global) local)))

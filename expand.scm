@@ -12,6 +12,7 @@
 ;;;
 ;;; Only the following special forms remain at the end:
 ;;;   QUOTE SET! IF LAMBDA TOP-LEVEL-REF TOP-LEVEL-SET! BEGIN
+;;;   FOREIGN-INLINE
 ;;; In addition, DEFINE remains if it is in a context not matched
 ;;; by the internal definition handler.  Those which are top-level
 ;;; will be handled specially by the top-level code, and those which
@@ -125,6 +126,10 @@
        (else
 	(case (identifier->name (car form))
 	  ((quote) (clean-ids form))		;nothing to do
+
+	  ((foreign-inline)
+	   `(foreign-inline ,(cadr form)
+			    ,@(map (cut expand <> env) (cddr form))))
 
 	  ((set!)
 	   (let ((var (cadr form))
@@ -272,7 +277,7 @@
       ;; normal definition
       (if (= (length defn) 3)
 	  defn
-	  (error clean-define "definition too long"))
+	  (error clean-define (format "definition too long: ~s" defn)))
       ;; implicit lambda
       (if (>= (length defn) 3)
 	  (let ((name (caadr defn))

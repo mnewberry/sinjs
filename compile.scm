@@ -2,183 +2,7 @@
 
 (use (srfi 1))
 
-
-;;; an inlinable is a procedure which codegen can compile into direct
-;;; JS syntax.
-;;; Simplification is responsible for inserting these:
-;;;
-;;; ((top-level-ref +) k arg1 arg2)
-;;;   => (k ((INLINE +) arg1 arg2))
-;;;
-;;; Each inlinable is specified in this table:
-;;; (NAME? NARGS) FORMAT
-;;;   NAME is a symbol naming the procedure
-;;;   NARGS is the number of args expected
-;;;   FORMAT is a format string to compile the inline with ~a for the
-;;;     compiled arguments, or a lambda
-(define inlinables
-  (let ()
-    ;; OP must have a single ~a in it
-    (define (unnumop op)
-      (lambda (z) (format (string-append "check_number(~a) && " op) z z)))
-    (define (unintop op)
-      (lambda (z) (format (string-append "check_integer(~a) && " op) z z)))
-    ;; must have two ~a's.
-    (define (binumop op)
-      (lambda (z1 z2)
-	(format (string-append "check_number(~a) && check_number(~a)&&" op)
-		z1 z2 z1 z2)))
-    (define (binintop op)
-      (lambda (z1 z2)
-	(format (string-append "check_integer(~a) && check_integer(~a)&&" op)
-		z1 z2 z1 z2)))
-
-    (define (char-tester op)
-      (lambda (c1 c2)
-	(format (string-append 
-		 "check_char(~a)&&check_char(~a)&&(~a).val.charCodeAt(0)" 
-		 op "(~a).val.charCodeAt(0)")
-		c1 c2 c1 c2)))
-
-    (define (binumop-simple op)
-      (binumop (string-append "((~a)" op "(~a))")))
-
-    '(((eq? 2) "((~a)===(~a))")
-      ((eqv? 2) "((~a)===(~a))")
-
-      ((number? 1) "typeof(~a) === 'number'")
-      ((complex? 1) "typeof(~a) === 'number'")
-      ((real? 1) "typeof(~a) === 'number'")
-      ((rational? 1) "typeof(~a) === 'number'")
-      ((integer? 1) ,(lambda (arg) (format "typeof(~a)==='number' && (Math.floor(~a)===(~a))"
-					 arg arg)))
-      ((exact? 1) "false")
-      ((inexact? 1) "true")
-      ((= 2) ,(binumop-simple "==="))
-      ((< 2) ,(binumop-simple "<"))
-      ((> 2) ,(binumop-simple ">"))
-      ((<= 2) ,(binumop-simple "<="))
-      ((>= 2) ,(binumop-simple ">="))
-      ((zero? 1) ,(unnumop "(~a)===0"))
-      ((positive? 1) ,(unnumop "(~a)>0"))
-      ((negative? 1) ,(unnumop "(~a)<0"))
-      ((odd? 1) ,(unintop "(~a)%2!==0"))
-      ((even? 1) ,(unintop "(~a)%2===0"))
-      ((+ 2) ,(binumop-simple "+"))
-      ((* 2) ,(binumop-simple "*"))
-      ((- 1) ,(unnumop "-(~a)"))
-      ((- 2) ,(binumop-simple "-"))
-      ((/ 1) ,(unnumop "1/(~a)"))
-      ((/ 2) ,(binumop-simple "/"))
-      ((abs 1) ,(unnumop "Math.abs(~a)"))
-      ((remainder 2) ,(binintop "(~a)%(~a)"))
-      ((floor 1) ,(unnumop "Math.floor(~a)"))
-      ((ceiling 1) ,(unnumop "Math.ceil(~a)"))
-      ((exp 1) ,(unnumop "Math.exp(~a)"))
-      ((log 1) ,(unnumop "Math.log(~a)"))
-      ((sin 1) ,(unnumop "Math.sin(~a)"))
-      ((cos 1) ,(unnumop "Math.cos(~a)"))
-      ((tan 1) ,(unnumop "Math.tan(~a)"))
-      ((asin 1) ,(unnumop "Math.asin(~a)"))
-      ((acos 1) ,(unnumop "Math.acos(~a)"))
-      ((atan 1) ,(unnumop "Math.atan(~a)"))
-      ((sqrt 1) ,(unnumop "Math.sqrt(~a)"))
-      ((expt 2) ,(binumop "Math.pow(~a,~a)"))
-      ((exact->inexact 1) ,(unnumop "~a"))
-      ((inexact->exact 1) ,(unnumop "~a"))
-
-      ((not 1) "(~a)===false")
-      ((boolean? 1) "typeof(~a)==='boolean'")
-
-      ((pair? 1) "(~a).constructor===Pair")
-      ((cons 2)"new Pair(~a,~a)")
-      ((car 1) ,(lambda (p) (format "check_pair(~a)&&(~a).car" p p)))
-      ((cdr 1) ,(lambda (p) (format "check_pair(~a)&&(~a).cdr" p p)))
-      ((caar 1) 
-	    ,(lambda (p) 
-	       ((format "check_pair(~a)&&check_pair(~a.car)&&(~a).car.car" p p p)))
-      ((cadr 1)
-	    ,(lambda (p) 
-	       ((format "check_pair(~a)&&check_pair(~a.cdr)&&(~a).cdr.car" p p p)))
-      ((cdar 1)
-	    ,(lambda (p) 
-	       ((format "check_pair(~a)&&check_pair(~a.car)&&(~a).car.cdr" p p p)))
-      ((cddr 1)
-	    ,(lambda (p) 
-	       ((format "check_pair(~a)&&check_pair(~a.cdr)&&(~a).cdr.cdr" p p p)))
-      ((null? 1) "(~a)===theNIL")
-      
-      ((symbol? 1) "typeof(~a)==='string'")
-      ((symbol->string 1) ,(lambda (s)
-			   (format "check_symbol(~a)&&new SchemeString(~a)" s s)))
-      ((string->symbol 1) ,(lambda (s)
-			   (format "check_string(~a)&&(~a).val" s s)))
-      
-      ((char? 1) "(~a).constructor===SchemeChar")
-      ((char=? 2) ,(char-tester "==="))
-      ((char<? 2) ,(char-tester "<"))
-      ((char>? 2) ,(char-tester ">"))
-      ((char<=? 2) ,(char-tester "<="))
-      ((char>=? 2) ,(char-tester ">="))
-      ((char->integer 1) ,(lambda (c)
-			  (format "check_char(~a)&&(~a).val.charCodeAt(0)" c c)))
-      ((integer->char 1) 
-		     ,(lambda (n)
-			(format
-			 "check_integer(~a)&&intern_char(String.fromCharCode(~a))"
-			 n n)))
-      
-      ((string? 1) "(~a).constructor===SchemeString")
-      ((string-length 1) ,(lambda (s)
-			  (format "check_string(~a)&&(~a).val.length" s s)))
-      ((string-ref 2) ,(lambda (s n)
-		       ((format "check_string_and_len((~a),(~a))&&intern_char((~a).val.charAt(~a))" s n s n)))
-      ((string-set! 2) ,(lambda (s n c)
-			(format "check_string_and_len((~a),(~a))&&check_char(~a)&&(~a).val=(~a).val.slice(0,(~a))+(~a).val+(~a).val.slice((~a)+1)&&\"string-set! undefined-value\"")
-			s n c s s n c s n))
-      ((string=? 2) ,(lambda (s1 s2)
-		     (format "check_string(~a)&&check_string(~a)&&(~a).val===(~a).val"
-			     s1 s2 s1 s2)))
-      ((substring 3) ,(lambda (s start end)
-		      ((format "check_integer(~a)&&check_string_and_len((~a),(~a))&&new SchemeString((~a).val.substring((~a),(~a)))"
-			      start s end s start end)))
-      ((string-copy 1) ,(lambda (s)
-			(format "check_string(~a)&&new SchemeString((~a).val)"
-				s s)))
-
-      ((vector? 1) "(~a).constructor===Array")
-      ((vector-length 1) ,(lambda (v)
-			  (format "check_vector(~a)&&(~a).length")))
-      ((vector-ref 2) ,(lambda (v n)
-		       ((format "check_vector_and_len((~a),(~a))&&(~a)[~a]"
-			       v n v n)))
-      ((vector-set! 3) ,(lambda (v n obj)
-			(format "check_vector_and_len((~a),(~a))&&(~a)[~a]=(~a)&&\"vector-set! undefined value"
-				v n v n obj)))
-      
-      ((procedure? 1) "typeof(~a)==='function'")
-
-      ((input-port? 1) "(~a).constructor===SchemeInputPort")
-      ((output-port? 1) "(~a).constructor===SchemeOutputPort")
-      ((current-input-port 0) "sinjs_current_input_port")
-      ((current-output-port 0) "sinjs_current_output_port")
-      ((eof-object? 1) "(~a)===theEOF"))))
-
 (define (compile-form form)
-
-  (define (compile-inlining procedure args tmp-stream)
-    (cond 
-     ((assoc (list procedure (length args)) inlinables)
-      => (lambda (spec)
-	   (cond
-	    ((procedure? (cadr spec)) 
-	     (let ((tmps (n-names tmp-stream)))
-	       (apply string-append ... XXX)))
-	    ((string? (cadr spec)) (apply format (cadr spec) args))
-	    (else (error compile-inlining
-			 "bad inline procedure specification")))))
-     (else
-      (error compile-inlining "missing inline procedure specification"))))
 
   (define (compile-formals formals)
     (cond
@@ -222,7 +46,9 @@
      ((pair? datum)
       (string-append "new Pair(" (compile-literal (car datum)) ","
 		     (compile-literal (cdr datum)) ")"))
-     ((symbol? datum) (string-append "\"" (symbol->string datum) "\""))
+     ((symbol? datum) (string-append "\"" 
+				     (escape-string (symbol->string datum))
+				     "\""))
      ((string? datum) 
       (string-append "new SchemeString (\"" (escape-string datum) "\")"))
      (else (error (format "unsupported literal ~s\n" datum)))))
@@ -249,7 +75,7 @@
 				   (cdr vars)))
 		       ";\n")))
 
-  (define (compile-1 form tmp-stream)
+  (define (compile-1 form)
     (cond
    ;;; variables become JS variables [note, these are all locals]
      ((symbol? form) (compile-identifier form))
@@ -260,16 +86,25 @@
 	 (let ((variable (cadr form))
 	       (value (caddr form)))
 	   (string-append (compile-identifier variable) "=(" 
-			  (compile-1 value tmp-stream) ")")))
+			  (compile-1 value) ")")))
 
 	((quote)
 	 (compile-literal (cadr form)))
+
+	((foreign-inline)
+	 (let ((code (cadr form))
+	       (args (cddr form)))
+	   (display (format "inlining: ~s\n" form))
+	   (apply format code 
+		  (map (lambda (arg)
+			 (string-append "(" (compile-1 arg) ")"))
+		       args))))
 
 	((top-level-set!)
 	 (let ((variable (cadr form))
 	       (value (caddr form)))
 	   (string-append "top_level_binding['" (symbol->string variable)
-			  "']=(" (compile-1 value tmp-stream) ")")))
+			  "']=(" (compile-1 value) ")")))
 
 	((top-level-ref)
 	 (let ((variable (cadr form)))
@@ -280,102 +115,35 @@
 	 (let ((test (cadr form))
 	       (true-branch (caddr form))
 	       (false-branch (cadddr form)))
-	   (string-append "(" (compile-1 test tmp-stream) ")!=false?(" 
-			  (compile-1 true-branch tmp-stream) "):(" 
-			  (compile-1 false-branch tmp-stream) ")")))
+	   (string-append "(" (compile-1 test) ")!=false?(" 
+			  (compile-1 true-branch) "):(" 
+			  (compile-1 false-branch) ")")))
 
 	((lambda)
 	 (let ((formals (cadr form))
 	       (expression (caddr form)))
 	   (unless (null? (cdddr form))
 	     (error "implicit begin not supported in code generation\n"))
-	   (let-values (((tmpnames new-tmp-stream) 
-			 (count-inline-temps (caddr form))))
-	     (if (list? formals)
-		 (string-append "function (" (compile-formals formals) 
-				"){return function () {"
-				(compile-temp-decls tmpnames)
+	   (if (list? formals)
+	       (string-append "function (" (compile-formals formals) 
+			      "){return function () {"
+			      "return " 
+			      (compile-1 expression) ";};}")
+	       (let ((rest-var (take-right formals 0))
+		     (main-vars (drop-right formals 0)))
+		 (string-append "function (" (compile-formals main-vars) "){"
+				(compile-identifier rest-var)
+				"=sinjs_restify(arguments,"
+				(number->string (length main-vars))
+				"); return function () {"
 				"return " 
-				(compile-1 expression new-tmp-stream) ";};}")
-		 (let ((rest-var (take-right formals 0))
-		       (main-vars (drop-right formals 0)))
-		   (string-append "function (" (compile-formals main-vars) "){"
-				  (compile-identifier rest-var)
-				  "=sinjs_restify(arguments,"
-				  (number->string (length main-vars))
-				  "); return function () {"
-				  (compile-temp-decls tmpnames)
-				  "return " 
-				  (compile-1 expression new-tmp-stream)
-				  "};}"))))))
+				(compile-1 expression)
+				"};}")))))
 
 	(else
-	 (cond
-	  ;; inline tags are only allowed as CAR of combinations, and they
-	  ;; are caught below for that case directly.
-	  ((eq? (car form) inline-tag)
-	   (error compile-form "inline procedure tag escaped"))
-
-	  ((and (pair? (car form))
-		(eq? (caar form) inline-tag))
-	   (compile-inlining (cadar form) (cdr form) tmp-stream))
-
-	  (else
-	   (string-append "(" (compile-1 (car form) tmp-stream) ")(" 
-			  (compile-arguments (cdr form)) ")"))))))
+	 (string-append "(" (compile-1 (car form)) ")(" 
+			(compile-arguments (cdr form)) ")"))))
      (else (error (format "unknown expression ~s\n" form)))))
-
-  (compile-1 form #f))
-
-;;; Scan FORM and return a count of tmp variable names needed for use
-;;; inside its inline procedures.  A tmp variable name is
-;;; (potentially) required for each inline argument where the inline
-;;; is specified by a lambda (as opposed to format string).
-(define (count-inline-temps form)
-  (if (pair? form)
-      (case (car form)
-	((set! top-level-set!) (count-inline-temps (caddr form)))
-	((quote top-level-ref) 0)
-	((if) (+ (count-inline-temps (cadr form))
-		 (count-inline-temps (caddr form))
-		 (count-inline-temps (cadddr form))))
-	((lambda) 0)			;will get its own inline temps, see?
-	(else
-	 (cond
-	  ((eq? (car form) inline-tag)
-	   (error count-inline-temps "inline procedure tag escaped"))
-	  ((and (pair? (car form))
-		(eq? (caar form) inline-tag))
-	   (let ((spec (assoc (list (cadar form) (length (cdr form))))))
-	     (cond
-	      ((not spec) 
-	       (error count-inline-temps 
-		      "missing inline procedure specification"))
-	      ((procedure? (cadr spec)) 
-	       (apply + 
-		      (length (cdr form)) 
-		      (map count-inline-temps (cdr form))))
-	      ((string? (cadr spec))
-	       (apply + (map count-inline-temps (cdr form))))
-	      (else (error count-inline-temps "bad inline procedure spec")))))
-	  (else (apply + (map count-inline-temps form))))))
-      0))
-
-;;; make an inline temps stream for N temps; return two values:
-;;; the stream, and the list of names.
-(define (make-inline-temps n)
-  (let ((vars (map uniquify (make-list n 'tmp))))
-    (values vars 
-	    (lambda ()
-	      (if (null? vars)
-		  (error tmp-stream "ran out of temporary variables")
-		  (let ((var (car vars)))
-		    (set! vars (cdr vars))
-		    var))))))
-
-;;; return a list of N names from stream
-(define (n-names n stream)
-  (if (= n 0)
-      '()
-      (cons (stream) (n-names (- n 1) stream))))
+  
+  (compile-1 form))
 

@@ -1,0 +1,24 @@
+Extensions to the Scheme language for sinjs.
+
+(number->jsnum NUMBER)
+  Returns a JavaScript number for the Scheme NUMBER.  It is an error if
+  NUMBER is not real.  If NUMBER is too big to fit in a JavaScript number,
+  an appropriate NaN might be returned.
+
+(foreign-inline CODE ARG ...)
+  CODE is a format string using exactly as many ~a elements as there are
+  ARGs.  When the args are substituted into the CODE, the result should be
+  a valid JavaScript expression evaluating to a possible Scheme object.
+
+  CODE must be a literal string.  ARG may be any Scheme expression.
+
+  Examples (without argument type checking):
+
+  (define (car p)
+    (foreign-inline "~a.car" p))
+
+  (define (sin x)
+    (foreign-inline "Math.sin(~a)" (number->jsnum x)))
+
+
+
