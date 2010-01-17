@@ -139,63 +139,30 @@
 ;;;
 ;;; Procedure definitions
 ;;;
-;;; R5RS guarantees that standard procedures continue to function correctly
-;;; even if others have been assigned.  We guarantee this by requiring
-;;; any procedure used by another standard procedure to be either inlined,
-;;; or specially dealt with.  
-
-;;; The strategy then is to inline something if it's easy, or if it
-;;; is used a lot.
-
-;;; All R5RS-specified procedures are inlined except these:
-;;;   equal? max min quotient modulo gcd lcm numerator denominator
-;;;   truncate round rationalize number->string string->number
-;;;   list? list length append reverse list-tail list-ref
-;;;   memq memv member assq assv assoc 
-;;;   char-ci=? char-ci<? char-ci>? char-ci<=? char-ci>=?
-;;;   char-alphabetic? char-numeric? char-whitespace? 
-;;;   char-upper-case? char-lower-case? char-upcase char-downcase
-;;;   make-string string string-append string->list list->string string-fill!
-;;;   string-ci=? string<? string>? string<=? string>=? 
-;;;   string-ci<? string-ci>? string-ci<=? string-ci>=?
-;;;   make-vector vector vector->list list->vector vector-fill!
-;;;   apply map for-each force call-with-current-continuation
-;;;   values call-with-values dynamic-wind
-;;;   call-with-input-file call-with-output-file
-;;;   with-input-from-file with-output-to-file
-;;;   open-input-file open-output-file close-input-port close-output-port
-;;;   read read-char peek-char char-ready? write display newline write-char
-;;;   = < > <= >=  [with more than one arg]
-;;;   + * [with other than two args]
-;;;   - / [with more than two args]
-;;;   c*r [three or four d/a's]
-;;;   current-input-port current-output-port [with one arg]
 
 ;;; PROCEDURES (equivalence)
-;;;
-;;; Builtin: eq?
+
+(define (eq? x y)
+  (foreign-inline "~a===~a" x y))
 
 (define eqv? eq?)	       ;ok b/c we know chars and numbers are eq
 
-(define equal?
-  (let ()
-    (define (equal? a b)
-      (or (eqv? a b)
-	  (and (pair? a)
-	       (pair? b)
-	       (equal? (car a) (car b))
-	       (equal? (cdr a) (cdr b)))
-	  (and (vector? a)
-	       (vector? b)
-	       (= (vector-length a) (vector-length b))
-	       (let next-elt ((i 0))
-		 (or (= i (vector-length a))
-		     (and (equal? (vector-ref a i) (vector-ref b i))
-			  (next-elt (+ i 1))))))
-	  (and (string? a)
-	       (string? b)
-	       (string=? a b))))
-    equal?))
+(define (equal? a b)
+  (or (eqv? a b)
+      (and (pair? a)
+	   (pair? b)
+	   (equal? (car a) (car b))
+	   (equal? (cdr a) (cdr b)))
+      (and (vector? a)
+	   (vector? b)
+	   (= (vector-length a) (vector-length b))
+	   (let next-elt ((i 0))
+	     (or (= i (vector-length a))
+		 (and (equal? (vector-ref a i) (vector-ref b i))
+		      (next-elt (+ i 1))))))
+      (and (string? a)
+	   (string? b)
+	   (string=? a b))))
 
 ;;;
 ;;; PROCEDURES (numbers)
@@ -214,26 +181,34 @@
 ;;; tell quite what we're up to.  Except, that is, for the curious behavior
 ;;; of the exact? and inexact->exact procedures.
 
-;;;
-;;; Builtin are the following procedures:
-;;;   number? < > <= >= + * - / abs remainder
-;;;   floor ceiling
-;;;   exp log sin cos tan asin acos atan sqrt expt
-;;;   number->string string->number
 ;;; The following are not provided, in accord with the permission
 ;;; of R5RS to omit them if we don't support general complex numbers:
 ;;;   make-rectangular make-polar real-part imag-part magnitude angle
 
+(define (number? obj)
+  (foreign-inline "typeof(~a)==='number'" obj))
 (define complex? number?)
 (define real? number?)
 (define rational? number?)
-
 (define (integer? obj)
   (and (number? obj)
        (= obj (floor obj))))
 
 (define (exact? z) #f)
 (define (inexact? z) #t)
+
+(define-syntax num-compare
+  (syntax-rules ()
+    ((_ scheme-name js-expr)
+     (define (scheme-name z1 z2 . zs)
+       (and (foreign-inline js-expr (%%check-number z1) (%%check-number z2))
+	    (or (null? zs)
+		(apply scheme-name z2 zs)))))))
+(num-compare = "~a===~a")
+(num-compare < "~a<~a")
+(num-compare > "~a>~a")
+(num-compare <= "~a<=~a")
+(num-compare >= "~a>=~a")
 
 (define (zero? z)
   (= z 0))
@@ -262,9 +237,45 @@
      ((< (car l) bottom) (loop (cdr l) (car l)))
      (else (loop (cdr l) bottom)))))
 
+(define-syntax comm-op
+  (syntax-rules ()
+    ((_ scheme-name base-val js-expr)
+     (define (scheme-name . zs)
+       (cond
+	((null? zs) base-val)
+	((null? (cdr zs)) (%%check-number (car zs)))
+	(else  (apply scheme-name
+		      (foreign-inline js-expr 
+				      (%%check-number (car zs))
+				      (%%check-number (cadr zs)))
+		      (cddr zs))))))))
+(comm-op + 0 "~a+~a")
+(comm-op * 1 "~a*~a")
+
+(define-syntax dim-op
+  (syntax-rules ()
+    ((_ scheme-name unary-js-expr binary-js-expr)
+     (define (scheme-name z1 . zs)
+       (if (null? zs)
+	   (foreign-inline unary-js-expr (%%check-number z1))
+	   (let ((first  (foreign-inline binary-js-expr 
+					 (%%check-number z1)
+					 (%%check-number (car zs)))))
+	     (if (null? (cdr zs))
+		 first
+		 (apply scheme-name first (cdr zs)))))))))
+(dim-op - "-~a" "~a-~a")
+(dim-op / "1/~a" "~a/~a")
+
+(define (abs z)
+  (foreign-inline "Math.abs(~a)" (%%check-number z)))
+
 ;;; JS has no builtin integer division!
 (define (quotient n1 n2)
   (/ (- n1 (remainder n1 n2)) n2))
+
+(define (remainder n1 n2)
+  (foreign-inline "~a%~a" (%%check-integer n1) (%%check-integer n2)))
 
 (define (modulo n1 n2)
   (let ((r (remainder n1 n2)))
@@ -285,15 +296,13 @@
 	g
 	(next (cdr ns) (gcd* g (car ns))))))
 
-(define lcm
-  (let ((gcd gcd))
-    (lambda ns
-      (define (lcm* a b)
-	(* (/ (abs a) (gcd a b)) (abs b)))
-      (let next ((ns ns) (m 1))
-	(if (null? ns)
-	    m
-	    (next (cdr ns) (lcm* m (car ns))))))
+(define (lcm . ns)
+  (define (lcm* a b)
+    (* (/ (abs a) (gcd a b)) (abs b)))
+  (let next ((ns ns) (m 1))
+    (if (null? ns)
+	m
+	(next (cdr ns) (lcm* m (car ns))))))
 
 (define (denominator q)
   ;; assume we're dealing with binary floating point
@@ -316,10 +325,17 @@
 			(next-search midpoint ub)))))
 	    (next-ub-guess (* ub 2))))))
 
-(define numerator
-  (let ((denominator denominator))
-    (lambda (q)
-      (* (denominator q) q))))
+(define (numerator q)
+  (* (denominator q) q))
+
+(define-syntax unary-math-op
+  (syntax-rules ()
+    ((_ scheme-name js-expr)
+     (define (scheme-name x)
+       (foreign-inline js-expr (%%check-number x))))))
+
+(unary-math-op floor "Math.floor(~a)")    
+(unary-math-op ceiling "Math.ceil(~a)")
 
 (define (truncate x)
   (cond
@@ -359,23 +375,35 @@
    ((negative? e) (find-it (+ x e) (- x e)))
    (else x)))
 
+(unary-math-op exp "Math.exp(~a)")
+(unary-math-op log "Math.log(~a)")
+(unary-math-op sin "Math.sin(~a)")
+(unary-math-op cos "Math.cos(~a)")
+(unary-math-op tan "Math.tan(~a)")
+(unary-math-op asin "Math.asin(~a)")
+(unary-math-op acos "Math.acos(~a)")
+
+(define (atan x . y*)
+  (if (null? y*)
+      (foreign-inline "Math.tan(~a)" (%%check-number x))
+      (foreign-inline "Math.tan2(~a,~a)" 
+		      (%%check-number x) (%%check-number (car y*)))))
+
+(unary-math-op sqrt "Math.sqrt(~a)")
+
+(define (expt z1 z2)
+  (foreign-inline "Math.pow(~a,~a)" (%%check-number z1) (%%check-number z2)))
+
 (define (exact->inexact z) z)
 (define (inexact->exact z) z)
+
+(unary-math-op number->string "new SchemeString(String(~a))")
+(define string->number 'xxx)
+
 
 ;;;
 ;;; PROCEDURES (other data types)  
 ;;;
-;;; Builtin are:
-;;;   pair? cons car cdr set-car! set-cdr!
-;;;   symbol? symbol->string string->symbol 
-;;;   char? char->integer integer->char
-;;;   string? make-string string string-length string-ref string-set! 
-;;;   string=? string<? string>? string<=? string>=? list->string string-fill!
-;;;   vector? make-vector vector vector-length vector-ref 
-;;;   vector-set! list->vector
-;;;
-;;; For efficiency's sake:
-;;;   substring string-append
 
 (define (boolean? obj)
   (or (eq? obj #t)
@@ -383,6 +411,24 @@
 
 (define (not obj)
   (if obj #f #t))
+
+(define (pair? obj)
+  (foreign-inline "~a.constructor===Pair" obj))
+
+(define (cons a d)
+  (foreign-inline "new Pair(~a,~a)" a d))
+
+(define (car p)
+  (foreign-inline "~a.car" (%%check-pair p)))
+(define (cdr p)
+  (foreign-inline "~a.cdr" (%%check-pair p)))
+
+(define (set-car! p obj)
+  (foreign-inline "~a.car=~a" (%%check-pair p) obj)
+  'set-car!-undefined-value)
+(define (set-cdr! p obj)
+  (foreign-inline "~a.cdr=~a" (%%check-pair p) obj)
+  'set-cdr!-undefined-value)
 
 (define (caar obj) (car (car obj)))
 (define (cadr obj) (car (cdr obj)))
@@ -425,13 +471,10 @@
 
 (define (list . objs) objs)
 
-(define length
-  (let ()
-    (define (length list)
-      (if (null? list)
-	  0
-	  (+ 1 (length (cdr list)))))
-    length))
+(define (length list)
+  (if (null? list)
+      0
+      (+ 1 (length (cdr list)))))
 
 (define (append . lists)
   (let append* ((lists lists))
@@ -460,94 +503,81 @@
       (car list)
       (list-ref (cdr list) (- k 1))))
 
-(define memq
-  (let ()
-    (define (memq obj list)
-      (and (pair? list)
-	   (if (eq? obj (car list))
-	       list
-	       (memq obj (cdr list)))))
-    memq))
+(define (memq obj list)
+  (and (pair? list)
+       (if (eq? obj (car list))
+	   list
+	   (memq obj (cdr list)))))
 
-(define memv
-  (let ()
-    (define (memv obj list)
-      (and (pair? list)
-	   (if (eqv? obj (car list))
-	       list
-	       (memv obj (cdr list)))))
-    memv))
+(define (memv obj list)
+  (and (pair? list)
+       (if (eqv? obj (car list))
+	   list
+	   (memv obj (cdr list)))))
 
-(define member
-  (let ((equal? equal?))
-    (define (member obj list)
-      (and (pair? list)
-	   (if (equal? obj (car list))
-	       list
-	       (member obj (cdr list)))))
-    member))
+(define (member obj list)
+  (and (pair? list)
+       (if (equal? obj (car list))
+	   list
+	   (member obj (cdr list)))))
 
-
-(define assq
-  (let ()
-    (define (assq obj alist)
-      (and (pair? alist)
+(define (assq obj alist)
+  (and (pair? alist)
        (if (eq? obj (caar alist))
 	   (car alist)
 	   (assq obj (cdr alist)))))
-    assq))
 
-(define assv
-  (let ()
-    (define (assv obj alist)
-      (and (pair? alist)
-	   (if (eqv? obj (caar alist))
-	       (car alist)
-	       (assv obj (cdr alist)))))
-    assv))
+(define (assv obj alist)
+  (and (pair? alist)
+       (if (eqv? obj (caar alist))
+	   (car alist)
+	   (assv obj (cdr alist)))))
 
-(define assoc
-  (let ((equal? equal?))
-    (define (assoc obj alist)
-      (and (pair? alist)
-	   (if (equal? obj (caar alist))
-	       (car alist)
-	       (assoc obj (cdr alist)))))
-    assoc))
+(define (assoc obj alist)
+  (and (pair? alist)
+       (if (equal? obj (caar alist))
+	   (car alist)
+	   (assoc obj (cdr alist)))))
 
-(define-syntax char-compare
+(define (symbol? obj)
+  (foreign-inline "typeof(~a)==='string'" obj))
+
+(define (symbol->string sym)
+  (foreign-inline "new SchemeString(~a)" (%%check-symbol sym)))
+
+(define (string->symbol sym)
+  (foreign-inline "~a.val" (%%check-string sym)))
+
+(define (char? obj)
+  (foreign-inline "~a.constructor===SchemeChar" obj))
+
+(define-syntax char-comp
   (syntax-rules ()
-    ((_ name test? cvt)
-     (define (name char1 char2)
-       (test? (cvt char1) (cvt char2))))))
-(define-syntax char-compare-protect
+    ((_ scheme-name js-expr)
+     (define (scheme-name c1 c2)
+       (foreign-inline js-expr (%%check-char c1) (%%check-char c2))))))
+
+(char-comp char=? "~a.val===~a.val")
+(char-comp char<? "~a.val<~a.val")
+(char-comp char>? "~a.val>~a.val")
+(char-comp char<=? "~a.val<=~a.val")
+(char-comp char>=? "~a.val>=~a.val")
+
+(define-syntax ci-char-comp
   (syntax-rules ()
-    ((_ name test? cvt)
-     (define name
-       (let ((cvt cvt)
-	     (test? test?))
-	 (lambda (char1 char2)
-	   (test? (cvt char1) (cvt char2))))))))
+    ((_ ci-scheme-name simple-scheme-name)
+     (define (ci-scheme-name c1 c2)
+       (simple-scheme-name (char-upcase c1) (char-upcase c2))))))
 
+(ci-char-comp char-ci=? char=?)
+(ci-char-comp char-ci<? char<?)
+(ci-char-comp char-ci>? char>?)
+(ci-char-comp char-ci<=? char<=?)
+(ci-char-comp char-ci>=? char>=?)
 
-;;; Each requires the specified two procedures
-(char-compare char=? = char->integer)
-(char-compare char<? < char->integer)
-(char-compare char>? > char->integer)
-(char-compare char<=? <= char->integer)
-(char-compare char>=? >= char->integer)
-(char-compare-protect char-ci=? char=? char-upcase)
-(char-compare-protect char-ci<? char<? char-upcase)
-(char-compare-protect char-ci>? char>? char-upcase)
-(char-compare-protect char-ci<=? char<=? char-upcase)
-(char-compare-protect char-ci>=? char>=? char-upcase)
-
-(define char-alphabetic?
-  (let ((char-upper-case char-upper-case)
-	(char-lower-case char-lower-care))
-    (lambda (c)
-      (or (char-upper-case? c)
-	  (char-lower-case? c)))))
+(define (char-alphabetic? c)
+  (or (char-upper-case? c)
+      (char-lower-case? c)))
 
 (define (char-numeric? c)
   (let ((n (char->integer c)))
@@ -569,65 +599,117 @@
   (let ((n (char->integer c)))
     (and (>= n 97) (<= n 122))))
   
-(define char-upcase
-  (let ((char-lower-case char-lower-case))
-    (if (char-lower-case? c)
-	(integer->char (- (char->integer c) 32))
-	c)))
+(define (char->integer c)
+  (foreign-inline "~a.val.charCodeAt(0)" (%%check-char c)))
 
-(define char-downcase
-  (let ((char-upper-case char-upper-case))
-    (lambda (c)
-      (if (char-upper-case? c)
-	  (integer->char (+ (char->integer c) 32))
-	  c))))
+(define (integer->char n)
+  (foreign-inline "intern_char(String.fromCharCode(~a))" (%%check-integer n)))
 
-(define string-ci=?
-  (let ((char-ci=? char-ci=?))
-    (lambda (string1 string2)
-      (let ((len (string-length string1)))
-	(and (= len (string-length string2))
-	     (let next ((i 0))
-	       (or (= i len)
-		   (and (char-ci=? (string-ref string1 i)
-				   (string-ref string2 i))
-			(next (+ i 1))))))))))
+(define (char-upcase c)
+  (if (char-lower-case? c)
+      (integer->char (- (char->integer c) 32))
+      c))
+
+(define (char-downcase c)
+  (if (char-upper-case? c)
+      (integer->char (+ (char->integer c) 32))
+      c))
+
+(define (string? obj)
+  (foreign-inline "~a.constructor===SchemeString" obj))
+
+;;; MAKE-STRING in runtime
+;;; STRING in runtime
+
+(define (string-length s)
+  (foreign-inline "~a.val.length" (%%check-string s)))
+
+(define (string-ref s k)
+  (foreign-inline "intern_char(~a.val.charAt(~a))" s (%%check-string-len s k)))
+
+(define (string-set! s k c)
+  (foreign-inline "~a.val=~a.val.slice(0,~a)+~a.val+~a.val.slice(~a+1)"
+		  s s (%%check-string-len s k) (%%check-char c) s k)
+  'string-set!-undefined-value)
+
+(define-syntax string-comp
+  (syntax-rules ()
+    ((_ scheme-name js-expr)
+     (define (scheme-name s1 s2)
+       (foreign-inline js-expr (%%check-string s1) (%%check-string s2))))))
+
+(string-comp string=? "~a.val===~a.val")
+
+(define (string-ci=? s1 s2)
+  (let ((len (string-length s)))
+    (and (= len (string-length s2))
+	 (let next ((i 0))
+	   (or (= i len)
+	       (and (char-ci=? (string-ref s1 i)
+			       (string-ref s2 i))
+		    (next (+ i 1))))))))
+
+(string-comp string<? "~a.val<~a.val")
+(string-comp string>? "~a.val>~a.val")
+(string-comp string<=? "~a.val<=~a.val")
+(string-comp string>=? "~a.val>=~a.val")
 
 (define-syntax string-compare-ci
   (syntax-rules ()
     ((_ name lentest? chartest?)
-     (define name
-       (let ((lentest? lentest?)
-	     (chartest? chartest?)
-	     (char-ci=? char-ci=?))
-	 (define (name string1 string2)
-	   (let ((len1 (string-length string1))
-		 (len2 (string-length string2)))
-	     (let ((minlen (min len1 len2)))
-	       (let next ((i 0))
-		 (if (= i minlen)
-		     (lentest? len1 len2)
-		     (or (chartest? (string-ref string1 i)
-				    (string-ref string2 i))
-			 (and (char-ci=? (string-ref string1 i)
-					 (string-ref string2 i))
-			      (next (+ i 1))))))))))))))
+     (define (name s1 s2)
+       (let ((len1 (string-length s1))
+	     (len2 (string-length s2)))
+	 (let ((minlen (min len1 len2)))
+	   (let next ((i 0))
+	     (if (= i minlen)
+		 (lentest? len1 len2)
+		 (or (chartest? (string-ref s1 i)
+				(string-ref s2 i))
+		     (and (char-ci=? (string-ref s1 i)
+				     (string-ref s2 i))
+			  (next (+ i 1))))))))))))
 
 (string-compare-ci string-ci<? < char-ci<?)
 (string-compare-ci string-ci>? > char-ci>?)
 (string-compare-ci string-ci<=? <= char-ci<=?)
 (string-compare-ci string-ci>=? >= char-ci>=?)
 
+(define (substring s start end)
+  (foreign-inline "new SchemeString(~a.val.substring(~a,~a))"
+		  s (%%check-integer start) (%%check-string-len s (- end 1))))
+
+;;; STRING-APPEND in runtime
+
 (define (string->list s)
-  (let ((len (string-len s)))
+  (let ((len (string-length s)))
     (let next-char ((i len)
 		    (lis '()))
       (if (= len 0)
 	  lis
 	  (next-char (- i 1) (cons (string-ref s (- i 1)) lis))))))
 
+;;; LIST->STRING in runtime
+
 (define (string-copy s)
   (substring s 0 (string-length s)))
+
+;;; STRING-FILL! in runtime
+
+(define (vector? obj)
+  (foreign-inline "~a.constructor===Array" obj))
+
+;;; MAKE-VECTOR in runtime
+;;; VECTOR in runtime
+
+(define (vector-length v)
+  (foreign-inline "~a.length" (%%check-vector v)))
+
+(define (vector-ref v k)
+  (foreign-inline "~a[~a]" v (%%check-vector-len v k)))
+
+(define (vector-set! v k obj)
+  (foreign-inline "~a[~a]=~a" v (%%check-vector-len v k) obj))
 
 (define (vector->list v)
   (let ((len (vector-length v)))
@@ -637,6 +719,8 @@
 	  lis
 	  (next-elt (- i 1) (cons (vector-ref v (- i 1)) lis))))))
 
+;; LIST->VECTOR in runtime
+
 (define (vector-fill! v elt)
   (let ((len (vector-length v)))
     (do ((i 0 (+ i 1)))
@@ -645,38 +729,31 @@
 
 ;;;
 ;;; PROCEDURES (control features)
-;;;
-;;; Builtin are:
-;;;   procedure? apply call-with-current-continuation call-with-values
-;;;   dynamic-wind
 
-(define map
-  (let ((reverse reverse)
-	(apply apply))
-    (define map (proc list . lists)
-      (if (null? lists)
-	  (let map1 ((inlist list)
-		     (outlist '()))
-	    (if (null? inlist)
-		(reverse outlist)
-		(map1 (cdr inlist) (cons (proc (car inlist)) outlist))))
-	  (let map1 ((inlists (cons list lists))
-		     (outlist '()))
-	    (if (null? (car inlists))
-		(reverse outlist)
-		(map1 (map cdr inlists)
-		      (cons (apply proc (map car inlists)) outlist))))))
-    map))
+(define (procedure? obj)
+  (foreign-inline "typeof(~a)==='function'" obj))
 
-(define for-each
-  (let ((apply apply)
-	(map map))
-    (define (for-each proc . lists)
-      (if (not (null? (car lists)))
-	  (begin
-	    (apply proc (map car lists))
-	    (for-each proc (map cdr lists)))))
-    for-each))
+;;; APPLY in runtime
+
+(define (map proc list . lists)
+  (if (null? lists)
+      (let map1 ((inlist list)
+		 (outlist '()))
+	(if (null? inlist)
+	    (reverse outlist)
+	    (map1 (cdr inlist) (cons (proc (car inlist)) outlist))))
+      (let map1 ((inlists (cons list lists))
+		 (outlist '()))
+	(if (null? (car inlists))
+	    (reverse outlist)
+	    (map1 (map cdr inlists)
+		  (cons (apply proc (map car inlists)) outlist))))))
+
+(define (for-each proc . lists)
+  (if (not (null? (car lists)))
+      (begin
+	(apply proc (map car lists))
+	(for-each proc (map cdr lists)))))
 
 (define (force promise)
   (if (car promise)
@@ -688,65 +765,59 @@
 		   (set-cdr! promise val)
 		   val)))))
 
-(define values
-  (let ((apply apply)
-	(call-with-current-continuation call-with-current-continuation))
-    (lambda vals
-      (call-with-current-continuation
-       (lambda (c)
-	 (apply c vals))))))
+;;; CALL-WITH-CURRENT-CONTINUATION in runtime
+
+(define (values . vals)
+  (if (= (length vals) 1)
+      (car vals)
+      (foreign-inline "new MultipleValues(~a)" vals)))
+
+(define (call-with-values producer consumer)
+  (let ((vals (producer)))
+    (if (foreign-inline "~a.constructor===MultipleValues" vals)
+	(apply consumer (foreign-inline "~a.val" vals))
+	(consumer vals))))
 
 ;;;
 ;;; EVAL
 ;;;
-;;; Builtin are:
+;;; XXX not implemented yet:
 ;;;   eval scheme-report-environment null-environment interaction-environment
 
 ;;; INPUT AND OUTPUT
 ;;;
+;;; convert to proper form
 ;;; Builtin are
 ;;;   open-input-file open-output-file close-input-port close-output-port
 ;;;   input-port? output-port?
 ;;;   current-input-port current-output-port [with an arg, sets it, returns old]
 ;;;   read-char peek-char eof-object? char-ready? write-char
 ;;;
-(define call-with-input-file
-  (let ((open-input-file open-input-file)
-	(close-input-port close-input-port))
-    (lambda (str proc)
-      (let ((p (open-input-file str)))
-	(proc p)
-	(close-input-port p)))))
+(define (call-with-input-file str proc)
+  (let ((p (open-input-file str)))
+    (proc p)
+    (close-input-port p)))
 
-(define call-with-output-file
-  (let ((open-output-file open-output-file)
-	(close-output-port close-output-port))
-    (lambda (str proc)
-      (let ((p (open-output-file str)))
-	(proc p)
-	(close-output-port p)))))
+(define (call-with-output-file str proc)
+  (let ((p (open-output-file str)))
+    (proc p)
+    (close-output-port p)))
 
 (define (port? p)
   (or (input-port? p)
       (output-port? p)))
 
-(define with-input-from-file
-  (let ((call-with-input-file call-with-input-file)
-	(current-input-port current-input-port))
-    (lambda (str proc)
-      (call-with-input-file str (lambda (p)
-				  (let ((old (current-input-port p)))
-				    (proc)
-				    (current-input-port old)))))))
+(define (with-input-from-file str proc)
+  (call-with-input-file str (lambda (p)
+			      (let ((old (current-input-port p)))
+				(proc)
+				(current-input-port old)))))
 
-(define with-output-to-file
-  (let ((call-with-output-file call-with-output-file)
-	(current-output-port current-output-port))
-    (lambda (str proc)
-      (call-with-output-file str (lambda (p)
-				   (let ((old (current-output-port p)))
-				     (proc)
-				     (current-output-port old)))))))
+(define (with-output-to-file str proc)
+  (call-with-output-file str (lambda (p)
+			       (let ((old (current-output-port p)))
+				 (proc)
+				 (current-output-port old)))))
 
 ;;; Requires NULL? CURRENT-INPUT-PORT CAR PEEK-CHAR MEMV STRING-APPEND
 ;;; STRING CHAR-DOWNCASE READ-CHAR LIST ERROR EQV? LIST->VECTOR 
@@ -879,107 +950,126 @@
 
     (read*)))
 
-(define write
-  (let ((current-output-port current-output-port)
-	(write-char write-char)
-	(display display)
-	(vector->list vector->list)
-	(number->string number->string)
-	(port? port?))
-    (define (write obj . port*)
-      (let ((port (if (null? port*) (current-output-port) (car port*))))
-	(define (write-slashify str)
-	  (write-char #\" port)
-	  (let ((len (string-length str)))
-	    (do ((i 0 (+ i 1)))
-		((>= i len))
-	      (if (or (char=? (string-ref str i) #\")
-		      (char=? (string-ref str i) #\\))
-		  (write-char #\\ port))
-	      (write-char (string-ref str i) port)))
-	  (write-char #\" port))
+(define (write obj . port*)
+  (let ((port (if (null? port*) (current-output-port) (car port*))))
+    (define (write-slashify str)
+      (write-char #\" port)
+      (let ((len (string-length str)))
+	(do ((i 0 (+ i 1)))
+	    ((>= i len))
+	  (if (or (char=? (string-ref str i) #\")
+		  (char=? (string-ref str i) #\\))
+	      (write-char #\\ port))
+	  (write-char (string-ref str i) port)))
+      (write-char #\" port))
 
-	(define (write-rest tail)
-	  (cond
-	   ((null? tail) (write-char #\) port))
-	   ((pair? tail)
-	    (write-char #\space port)
-	    (write (car tail) port)
-	    (write-rest (cdr tail)))
-	   (else (display " . " port)
-		 (write tail port)
-		 (write-char #\) port))))
+    (define (write-rest tail)
+      (cond
+       ((null? tail) (write-char #\) port))
+       ((pair? tail)
+	(write-char #\space port)
+	(write (car tail) port)
+	(write-rest (cdr tail)))
+       (else (display " . " port)
+	     (write tail port)
+	     (write-char #\) port))))
 
-	(cond
-	 ((eq? obj #t) (display "#t" port))
-	 ((eq? obj #f) (display "#f" port))
-	 ((symbol? obj) (display (symbol->string obj) port))
-	 ((char? obj) (display (case obj
-				 ((#\newline) "#\\newline")
-				 ((#\return) "#\\return")
-				 ((#\page) "#\\page")
-				 ((#\tab) "#\\tab")
-				 ((#\space) "#\\space")
-				 (else (string #\# #\\ obj))) port))
-	 ((vector? obj) (write-char #\# port) (write (vector->list obj) port))
-	 ((pair? obj) 
-	  (write-char #\( port)
-	  (write (car obj) port) 
-	  (write-rest (cdr obj)))
-	 ((null? obj) (display "()" port))
-	 ((number? obj) (display (number->string obj) port))
-	 ((string? obj) (write-slashify obj))
-	 ((procedure? obj) (display "#<procedure>" port))
-	 ((eof-object? obj) (display "#<eof>" port))
-	 ((port? obj) (display "#<port>" port)))))
-    write))
+    (cond
+     ((eq? obj #t) (display "#t" port))
+     ((eq? obj #f) (display "#f" port))
+     ((symbol? obj) (display (symbol->string obj) port))
+     ((char? obj) (display (case obj
+			     ((#\newline) "#\\newline")
+			     ((#\return) "#\\return")
+			     ((#\page) "#\\page")
+			     ((#\tab) "#\\tab")
+			     ((#\space) "#\\space")
+			     (else (string #\# #\\ obj))) port))
+     ((vector? obj) (write-char #\# port) (write (vector->list obj) port))
+     ((pair? obj) 
+      (write-char #\( port)
+      (write (car obj) port) 
+      (write-rest (cdr obj)))
+     ((null? obj) (display "()" port))
+     ((number? obj) (display (number->string obj) port))
+     ((string? obj) (write-slashify obj))
+     ((procedure? obj) (display "#<procedure>" port))
+     ((eof-object? obj) (display "#<eof>" port))
+     ((port? obj) (display "#<port>" port)))))
 
-(define display
-  (let ((current-output-port current-output-port)
-	(write-char write-char)
-	(vector->list vector->list)
-	(port? port?))
-    (define (display obj . port*)
-      (let ((port (if (null? port*) (current-output-port) (car port*))))
-	(define (display-rest tail)
-	  (cond
-	   ((null? tail) (write-char #\) port))
-	   ((pair? tail)
-	    (write-char #\space port)
-	    (display (car tail) port)
-	    (display-rest (cdr tail)))
-	   (else (display " . " port)
-		 (display tail port)
-		 (write-char #\) port))))
+(define (display obj . port*)
+  (let ((port (if (null? port*) (current-output-port) (car port*))))
+    (define (display-rest tail)
+      (cond
+       ((null? tail) (write-char #\) port))
+       ((pair? tail)
+	(write-char #\space port)
+	(display (car tail) port)
+	(display-rest (cdr tail)))
+       (else (display " . " port)
+	     (display tail port)
+	     (write-char #\) port))))
 
-	(cond
-	 ((eq? obj #t) (display "#t" port))
-	 ((eq? obj #f) (display "#f" port))
-	 ((symbol? obj) (display (symbol->string obj) port))
-	 ((char? obj) (write-char obj port))
-	 ((vector? obj) (write-char #\# port) (display (vector->list obj) port))
-	 ((pair? obj) (write-char #\( port)
-	  (display (car obj) port) 
-	  (display-rest (cdr obj)))
-	 ((null? obj) (display "()" port))
-	 ((number? obj) (display (number->string obj) port))
-	 ((string? obj) (let ((len (string-length obj)))
-			  (do ((i 0 (+ i 1)))
-			      ((>= i len))
-			    (write-char (string-ref obj i) port))))
-	 ((procedure? obj) (display "#<procedure>" port))
-	 ((eof-object? obj) (display "#<eof>" port))
-	 ((port? obj) (display "#<port>" port)))))
-    display))
+    (cond
+     ((eq? obj #t) (display "#t" port))
+     ((eq? obj #f) (display "#f" port))
+     ((symbol? obj) (display (symbol->string obj) port))
+     ((char? obj) (write-char obj port))
+     ((vector? obj) (write-char #\# port) (display (vector->list obj) port))
+     ((pair? obj) (write-char #\( port)
+      (display (car obj) port) 
+      (display-rest (cdr obj)))
+     ((null? obj) (display "()" port))
+     ((number? obj) (display (number->string obj) port))
+     ((string? obj) (let ((len (string-length obj)))
+		      (do ((i 0 (+ i 1)))
+			  ((>= i len))
+			(write-char (string-ref obj i) port))))
+     ((procedure? obj) (display "#<procedure>" port))
+     ((eof-object? obj) (display "#<eof>" port))
+     ((port? obj) (display "#<port>" port)))))
     
-(define newline
-  (let ((write-char write-char)
-	(current-output-port current-output-port))
-    (lambda port*
-      (write-char #\newline 
-		  (if (null? port*) (current-output-port) (car port*))))))
+(define (newline . port*)
+  (write-char #\newline 
+	      (if (null? port*) (current-output-port) (car port*))))
 
 ;;; SYSTEM INTERFACE
 ;;;
 ;;; Not implemented:
 ;;; load transcript-on transcript-off
+
+;;; EXTENSIONS AND SUPPORT
+(define (js-throw name obj message)
+  (foreign-inline "(function (){throw{name:~a,obj:~a,message:~a};})()"
+		  name obj (string->symbol message)))
+(define (type-error obj type-name)
+  (js-throw 'SINJStypeerror obj (string-append "not a " type-name)))
+(define (length-error k name)
+  (js-throw 'SINJSlengtherror k
+	    (string-append "out of bounds for access to " name)))
+(define-syntax type-checker
+  (syntax-rules ()
+    ((_ scheme-name predicate? name)
+     (define (scheme-name obj)
+       (if (predicate? obj)
+	   obj
+	   (type-error obj name))))))
+		
+(type-checker %%check-number number? "number")
+(type-checker %%check-integer integer? "integer")
+(type-checker %%check-pair pair? "pair")
+(type-checker %%check-symbol symbol? "symbol")
+(type-checker %%check-string string? "string")
+(type-checker %%check-char char? "character")
+(type-checker %%check-vector vector? "vector")
+
+(define-syntax length-checker
+  (syntax-rules ()
+    ((_ scheme-name len-proc name)
+     (define (scheme-name obj k)
+       (if (and (>= k 0) 
+		(< k (len-proc obj)))
+	   k
+	   (length-error k name))))))
+(length-checker %%check-string-len string-length "string")
+(length-checker %%check-vector-len vector-length "vector")
