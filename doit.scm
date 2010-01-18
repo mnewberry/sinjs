@@ -5,20 +5,26 @@
 (load "simplify")
 (load "toplevel")
 
-(define (compile file to)
-  (call-with-output-file to
-    (lambda (pt)
-      (display 
-       (top-level-compile-forms
-	(call-with-input-file file
-	  (lambda (p)
-	    (let more ((so-far '()))
-	      (let ((obj (read p)))
-		(if (eof-object? obj)
-		    (reverse! so-far)
-		    (more (cons obj so-far))))))))
-       pt)
-      (newline pt))))
+(define (compile-to forms out)
+  (call-with-output-file out
+    (lambda (p)
+      (display (top-level-compile-forms forms) p)
+      (newline p))))
 
+(define (gather-forms in)
+  (call-with-input-file in
+    (lambda (p)
+      (let more ((so-far '()))
+	(let ((obj (read p)))
+	  (if (eof-object? obj)
+	      (reverse! so-far)
+	      (more (cons obj so-far))))))))
+  
+(define (compile-naked in out)
+  (compile-to (gather-forms in) out))
 
+(define (compile in out)
+  (compile-to (append (gather-forms "library.scm")
+		      (gather-forms in))
+	      out))
 
