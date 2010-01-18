@@ -2,8 +2,6 @@
 
 (use (srfi 1))
 
-(define reds 0)
-
 ;;; if global-set!s is #f, then make no assumptions about global
 ;;; assignments.
 (define (simplify form global-set!s local-set!s)
@@ -87,7 +85,6 @@
 	     #;(display (format "form ~s\n" form))
 	     #;(display (format "reducing with ~s\n\n"
 			      (map cons (cadr procedure) args)))
-	     (set! reds (+ reds 1))
 	     ;; try reduction; abandon if code size goes up
 	     (let ((b (beta-reduce (caddr procedure) 
 			  (map cons (cadr procedure) args))))
@@ -97,10 +94,7 @@
 
 	    (else (cons procedure args)))))))))
 
-  (set! reds 0)
-  (display (format "comp -> ~s\n" (complexity form)))
   (let ((f (simplify-1 form)))
-    (display (format "reds: ~s\n\n" reds))
     (if (equal? f form)
 	form
 	(simplify f global-set!s local-set!s))))
