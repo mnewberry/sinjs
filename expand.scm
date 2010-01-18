@@ -393,6 +393,7 @@
 	    (unless (null? (cddr pattern))
 	      (error match-syntax "non-final ellipsis in pattern"))
 	    (and (list? form)
+		 (not (identifier? form))
 		 (if (null? form)
 		     (null-ellipses (car pattern))
 		     (let ((matches  (map (cut match-syntax <> (car pattern))
