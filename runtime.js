@@ -162,64 +162,26 @@ function sinjs_repl_noprint_k(answer) {
 //
 
 // helper functions
-function check_number(a) {
-    if (typeof(a) !== "number")
-	throw { name: "SINJStypeerror",
-		message: a + " is not a number" };
-}
-
 function check_integer(a) {
     if ((typeof(a) !== "number") || (a !== Math.floor(a)))
 	throw { name: "SINJStypeerror",
 		message: a + " is not an integer" };
 }
-
 function check_pair(a) {
     if (a.constructor !== Pair)
 	throw { name: "SINJStypeerror",
 		message: a + " is not a pair" };
 }
-
-function check_symbol(a) {
-    if (typeof(a) !== "string")
-	throw { name: "SINJStypeerror",
-		message: a + " is not a symbol" };
-}
-
 function check_string(a) {
     if (a.constructor !== SchemeString)
 	throw { name: "SINJStypeerror",
 		message: a + " is not a string" };
 }
-
-function check_string_and_len (a, n) {
-    check_string (a);
-    check_integer (n);
-    if (a.length >= n)
-	throw { name: "SINJSlengtherror",
-		message: n + " is out of bounds for access to " + a};
-}
-
 function check_char(a) {
     if (a.constructor !== SchemeChar)
 	throw { name: "SINJStypeerror",
 		message: a + " is not a char" };
 }
-
-function check_vector (a) {
-    if (a.constructor !== Array) 
-	throw { name: "SINJStypeerror",
-		message: a + " is not a vector" };
-}
-
-function check_vector_and_len (a, n) {
-    check_vector (a);
-    check_integer (n);
-    if (a.length >= n)
-	throw { name: "SINJSlengtherror",
-		message: n + " is out of bounds for access to " + a};
-}	
-
 function check_procedure (a) {
     if (typeof(a) !== "function")
 	throw { name: "SINJStypeerror",
@@ -270,6 +232,14 @@ top_level_binding['string'] = function (k) {
     };
     return k(new SchemeString(s));
 };
+top_level_binding['%%string'] = function (k) {
+    var s, i;
+    s = '';
+    for (i = 1; i < arguments.length; i += 1) {
+	s = s + arguments[i].val;
+    };
+    return k(new SchemeString(s));
+};
 
 top_level_binding['string-append'] = function (k) {
     var s = "", i;
@@ -279,9 +249,16 @@ top_level_binding['string-append'] = function (k) {
     }
     return k(new SchemeString(s));
 };
+top_level_binding['%%string-append'] = function (k) {
+    var s = "", i;
+    for (i = 1; i < arguments.length; i += 1) {
+	s = s + arguments[i].val;
+    }
+    return k(new SchemeString(s));
+};
 top_level_binding['list->string'] = function (k, lis) {
     var s = "";
-    while (lis !== theNIL) {
+    while (lis !== theNil) {
 	check_pair(lis);
 	check_char(lis.car);
 	s = s + lis.car.val;
@@ -328,8 +305,19 @@ top_level_binding['list->vector'] = function (k, lis) {
     var a, i;
     a = [];
     i = 0;
-    while (lis !== theNIL) {
+    while (lis !== theNil) {
 	check_pair(lis);
+	a[i] = lis.car;
+	i += 1;
+	lis = lis.cdr;
+    };
+    return k(a);
+};
+top_level_binding['%%list->vector'] = function (k, lis) {
+    var a, i;
+    a = [];
+    i = 0;
+    while (lis !== theNil) {
 	a[i] = lis.car;
 	i += 1;
 	lis = lis.cdr;
@@ -352,6 +340,21 @@ top_level_binding['apply'] = function (k, proc) {
 	i += 1;
 	p = p.cdr;
 	check_pair_or_null (p);
+    };
+    return proc.apply(null, args);
+};
+sinjs_apply = 
+top_level_binding['%%apply'] = function (k, proc) {
+    var args = [], i, p;
+    args[0] = k;
+    for (i = 1; i < (arguments.length - 2); i += 1) {
+	args[i] = arguments[i + 1];
+    }
+    p = arguments[arguments.length - 1];
+    while (p !== theNil) {
+	args[i] = p.car;
+	i += 1;
+	p = p.cdr;
     };
     return proc.apply(null, args);
 };
@@ -379,94 +382,4 @@ top_level_binding['call-with-current-continuation'] = function (k, proc) {
 //
 // magical global vars, must be initialized in platform-specific code.
 var sinjs_current_input_port, sinjs_current_output_port;
-top_level_binding['input-port?'] = function (k, obj) {
-    return k(obj.constructor===SchemeInputPort);
-};
-top_level_binding['output-port?'] = function (k, obj) {
-    return k(obj.constructor===SchemeOutputPort);
-};
-top_level_binding['current-input-port'] = function (k) {
-    var pt = sinjs_current_input_port;
-    if (arguments.length > 1) {
-	check_input_port (arguments[1]);
-	sinjs_current_input_port = arguments[1];
-    };
-    return k(pt);
-};
-top_level_binding['current-output-port'] = function (k) {
-    var pt = sinjs_current_output_port;
-    if (arguments.length > 1) {
-	check_output_port (arguments[1]);
-	sinjs_current_output_port = arguments[1];
-    };
-    return k(pt);
-};
-top_level_binding['close-input-port'] = function (k, port) {
-    var close;
-    check_input_port (port);
-    close = port.closefn;
-    if (close !== false) {
-	port.closefn = false;
-	port.readfn = false;
-	port.peekfn = false;
-	port.readyfn = false;
-	(port.closefn)(port);
-    };
-    return k("close-input-port undefined value");
-};
-top_level_binding['close-output-port'] = function (k, port) {
-    var close;
-    check_output_port (port);
-    close = port.closefn;
-    if (close !== false) {
-	port.closefn = false;
-	port.writefn = false;
-	(port.closefn)(port);
-    };
-    return k("close-output-port undefined value");
-};
-top_level_binding['read-char'] = function (k) {
-    var port;
-    if (arguments.length > 1) {
-	port = arguments[1];
-    } else {
-	port = sinjs_current_input_port;
-    };
-    check_input_port (port);
-    return k(port.readfn(port));
-};
-top_level_binding['peek-char'] = function (k) {
-    var port;
-    if (arguments.length > 1) {
-	port = arguments[1];
-    } else {
-	port = sinjs_current_input_port;
-    };
-    check_input_port (port);
-    return k(port.peekfn(port));
-};
-top_level_binding['eof-object?'] = function (k, obj) {
-    return k(obj === theEOF);
-};
-top_level_binding['char-ready?'] = function (k) {
-    var port;
-    if (arguments.length > 1) {
-	port = arguments[1];
-    } else {
-	port = sinjs_current_input_port;
-    };
-    check_input_port (port);
-    return k(port.readyfn(port));
-};
-top_level_binding['write-char'] = function (k, c) {
-    var port;
-    check_char (c);
-    if (arguments.length > 2) {
-	port = arguments[2];
-    } else {
-	port = sinjs_current_output_port;
-    };
-    check_output_port (port);
-    port.writefn(port, c);
-    return k("write-char undefined value");
-};
+
