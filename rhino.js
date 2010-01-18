@@ -13,10 +13,10 @@ function rhino_read (port) {
 	return c;
     } else {
 	c = port.isr.read ();
-	if (c === null)
+	if (c === -1)
 	    return theEOF;
 	else
-	    return intern_char (c);
+	    return intern_char (String.fromCharCode(c));
     }
 };
 
@@ -24,10 +24,10 @@ function rhino_peek (port) {
     var c;
     if (port.peeked === false) {
 	c = port.isr.read ();
-	if (c === null)
+	if (c === -1)
 	    port.peeked = theEOF;
 	else
-	    port.peeked = intern_char(c);
+	    port.peeked = intern_char(String.fromCharCode(c));
     }
     return port.peeked;
 };
@@ -81,11 +81,6 @@ top_level_binding['open-output-file'] = function (k, name) {
 	      (new OutputStreamWriter
 	       (new FileWriter (name.val)))));
 };
-
-function rhino_cheating_write (answer) {
-    sinjs_current_output_port.osr.println(answer);
-    sinjs_current_output_port.osr.flush();
-}
 
 function rhino_initialize () {
     sinjs_current_input_port = 
