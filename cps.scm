@@ -33,8 +33,10 @@
        (let* ((code (cadr form))
 	      (args (cddr form))
 	      (temps (map (lambda ignored (uniquify 't)) args)))
-	 (cps-transform-combination args temps
-				    `(,k (foreign-inline ,code ,@temps)))))
+	 (if (null? args)
+	     `(,k (foreign-inline ,code))
+	     (cps-transform-combination args temps
+					`(,k (foreign-inline ,code ,@temps))))))
 
       ((set!)
        (let ((var (cadr form))
