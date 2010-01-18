@@ -147,7 +147,7 @@
 
 ;;; PROCEDURES (equivalence)
 
-(define (eq? x y)
+(define-integrable (eq? x y)
   (foreign-inline "~a===~a" x y))
 
 (define eqv? eq?)	       ;ok b/c we know chars and numbers are eq
@@ -190,7 +190,7 @@
 ;;; of R5RS to omit them if we don't support general complex numbers:
 ;;;   make-rectangular make-polar real-part imag-part magnitude angle
 
-(define (number? obj)
+(define-integrable (number? obj)
   (foreign-inline "typeof(~a)==='number'" obj))
 (define complex? number?)
 (define real? number?)
@@ -198,17 +198,17 @@
 (define (integer? obj)
   (and (number? obj)
        (%%integer? obj)))
-(define (%%integer? obj)
+(define-integrable (%%integer? obj)
   (%%=obj (%%floor obj)))
 
-(define (exact? z) #f)
-(define (inexact? z) #t)
+(define-integrable (exact? z) #f)
+(define-integrable (inexact? z) #t)
 
 (define-syntax num-compare
   (syntax-rules ()
     ((_ unchecked-scheme-name scheme-name js-expr)
      (begin
-       (define (unchecked-scheme-name z1 z2)
+       (define-integrable (unchecked-scheme-name z1 z2)
 	 (foreign-inline js-expr z1 z2))
        (define (scheme-name z1 z2 . zs)
 	 (and (unchecked-scheme-name (%%check-number z1) (%%check-number z2))
@@ -226,10 +226,10 @@
 (define (odd? n) (%%= 1 (remainder n 2)))
 (define (even? n) (%%= 0 (remainder n 2)))
 
-(define (%%zero? z) (%%= z 0))
-(define (%%positive? x) (%%> x 0))
-(define (%%negative? x) (%%< x 0))
-(define (%%even? x) (%%= 0 (%%remainder n 2)))
+(define-integrable (%%zero? z) (%%= z 0))
+(define-integrable (%%positive? x) (%%> x 0))
+(define-integrable (%%negative? x) (%%< x 0))
+(define-integrable (%%even? x) (%%= 0 (%%remainder n 2)))
 
 (define (max z1 . zs)
   (let loop ((l zs)
@@ -247,14 +247,14 @@
      ((< (%%car l) bottom) (loop (%%cdr l) (%%car l)))
      (else (loop (%%cdr l) bottom)))))
 
-(define (%%min z1 z2)
+(define-integrable (%%min z1 z2)
   (if (%%< z1 z2) z1 z2))
 
 (define-syntax comm-op
   (syntax-rules ()
     ((_ unchecked-scheme-name scheme-name base-val js-expr)
      (begin
-       (define (unchecked-scheme-name z1 z2)
+       (define-integrable (unchecked-scheme-name z1 z2)
 	 (foreign-inline js-expr z1 z2))
        (define (scheme-name . zs)
 	 (cond
@@ -270,7 +270,7 @@
   (syntax-rules ()
     ((_ unchecked-scheme-name scheme-name unary-js-expr binary-js-expr)
      (begin
-       (define (unchecked-scheme-name z1 z2)
+       (define-integrable (unchecked-scheme-name z1 z2)
 	 (foreign-inline binary-js-expr z1 z2))
        (define (scheme-name z1 . zs)
 	 (if (null? zs)
@@ -279,12 +279,12 @@
 						 (%%check-number (%%car zs)))))
 	       (if (null? (%%cdr zs))
 		   first
-		   (%%apply scheme-name first (%%cdr zs)))))))))
+		   (%%apply scheme-name first (%%cdr zs))))))))))
 (dim-op %%- - "-~a" "~a-~a")
 (dim-op %%/ / "1/~a" "~a/~a")
 
 (define (abs z) (%%abs (%%check-number z)))
-(define (%%abs z) (foreign-inline "Math.abs(~a)" z))
+(define-integrable (%%abs z) (foreign-inline "Math.abs(~a)" z))
 
 ;;; JS has no builtin integer division!
 (define (quotient n1 n2)
@@ -292,7 +292,7 @@
   (%%check-number n2)
   (%%/ (%%- n1 (%%remainder n1 n2)) n2))
 
-(define (%%remainder n1 n2)
+(define-integrable (%%remainder n1 n2)
   (foreign-inline "~a%~a" n1 n2))
 (define (remainder n1 n2)
   (%%remainder (%%check-integer n1) (%%check-integer n2)))
@@ -315,7 +315,7 @@
   (let next ((ns ns) (g 0))
     (if (null? ns)
 	g
-	(next (%%cdr ns) (%%gcd g (%%check-number (%%car ns))))))
+	(next (%%cdr ns) (%%gcd g (%%check-number (%%car ns)))))))
 
 (define (lcm . ns)
   (define (lcm* a b)
@@ -323,7 +323,7 @@
   (let next ((ns ns) (m 1))
     (if (null? ns)
 	m
-	(next (%%cdr ns) (lcm* m (%%check-number (%%car ns))))))
+	(next (%%cdr ns) (lcm* m (%%check-number (%%car ns)))))))
 
 (define (denominator q)
   ;; assume we're dealing with binary floating point
@@ -352,11 +352,11 @@
 (define-syntax unary-math-op
   (syntax-rules ()
     ((_ checked-scheme-name js-expr)
-     (define (checked-scheme-name x)
+     (define-integrable (checked-scheme-name x)
        (foreign-inline js-expr (%%check-number x))))
     ((_ unchecked-scheme-name checked-scheme-name js-expr)
      (begin
-       (define (unchecked-scheme-name x)
+       (define-integrable (unchecked-scheme-name x)
 	 (foreign-inline js-expr x))
        (define (checked-scheme-name x)
 	 (unchecked-scheme-name (%%check-number x)))))))
@@ -424,32 +424,38 @@
 (define (expt z1 z2)
   (foreign-inline "Math.pow(~a,~a)" (%%check-number z1) (%%check-number z2)))
 
-(define (exact->inexact z) z)
-(define (inexact->exact z) z)
+(define-integrable (exact->inexact z) z)
+(define-integrable (inexact->exact z) z)
 
 (unary-math-op %%number->string number->string "new SchemeString(String(~a))")
-(define string->number 'xxx)
 
+(define (%%string->number s)
+  (let ((val (foreign-inline "Number(~a.val)" s)))
+    (and (not (foreign-inline "isNaN(~a)" val))
+	 val)))
+
+(define (string->number s)
+  (%%string->number (%%check-string s)))
 
 ;;;
 ;;; PROCEDURES (other data types)  
 ;;;
 
-(define (boolean? obj)
+(define-integrable (boolean? obj)
   (or (eq? obj #t)
       (eq? obj #f)))
 
-(define (not obj)
+(define-integrable (not obj)
   (if obj #f #t))
 
-(define (pair? obj)
+(define-integrable (pair? obj)
   (foreign-inline "~a.constructor===Pair" obj))
 
-(define (cons a d)
+(define-integrable (cons a d)
   (foreign-inline "new Pair(~a,~a)" a d))
 
-(define (%%car p) (foreign-inline "~a.car" p))
-(define (%%cdr p) (foreign-inline "~a.cdr" p))
+(define-integrable (%%car p) (foreign-inline "~a.car" p))
+(define-integrable (%%cdr p) (foreign-inline "~a.cdr" p))
 (define (car p) (%%car (%%check-pair p)))
 (define (cdr p) (%%cdr (%%check-pair p)))
 
@@ -465,9 +471,9 @@
 (define (cdar obj) (cdr (car obj)))
 (define (cddr obj) (cdr (cdr obj)))
 
-(define (%%caar obj) (%%car (%%car obj)))
-(define (%%cdar obj) (%%cdr (%%car obj)))
-(define (%%cddr obj) (%%cdr (%%cdr obj)))
+(define-integrable (%%caar obj) (%%car (%%car obj)))
+(define-integrable (%%cdar obj) (%%cdr (%%car obj)))
+(define-integrable (%%cddr obj) (%%cdr (%%cdr obj)))
 
 (define (caaar obj) (car (caar obj)))
 (define (caadr obj) (car (cadr obj)))
@@ -495,7 +501,7 @@
 (define (cdddar obj) (cddr (cdar obj)))
 (define (cddddr obj) (cddr (cddr obj)))
 
-(define (null? obj)
+(define-integrable (null? obj)
   (eq? obj '()))
 
 (define (list? obj)
@@ -585,25 +591,27 @@
 	   (%%car alist)
 	   (assoc obj (%%cdr alist)))))
 
-(define (symbol? obj)
+(define-integrable (symbol? obj)
   (foreign-inline "typeof(~a)==='string'" obj))
 
-(define (%%symbol->string sym)
+(define-integrable (%%symbol->string sym)
   (foreign-inline "new SchemeString(~a)" sym))
 (define (symbol->string sym)
   (%%symbol->string (%%check-symbol sym)))
 
+(define-integrable (%%string->symbol sym)
+  (foreign-inline "~a.val" sym))
 (define (string->symbol sym)
-  (foreign-inline "~a.val" (%%check-string sym)))
+  (%%string->symbol (%%check-string sym)))
 
-(define (char? obj)
+(define-integrable (char? obj)
   (foreign-inline "~a.constructor===SchemeChar" obj))
 
 (define-syntax char-comp
   (syntax-rules ()
     ((_ unchecked-scheme-name scheme-name js-expr)
      (begin
-       (define (unchecked-scheme-name c1 c2)
+       (define-integrable (unchecked-scheme-name c1 c2)
 	 (foreign-inline js-expr c1 c2))
        (define (scheme-name c1 c2)
 	 (unchecked-scheme-name (%%check-char c1) (%%check-char c2)))))))
@@ -636,13 +644,17 @@
 (%%ci-char-comp %%char-ci<=? %%char<=?)
 (%%ci-char-comp %%char-ci>=? %%char>=?)
 
-(define (char-alphabetic? c)
-  (or (char-upper-case? c)
+(define (%%char-alphabetic? c)
+  (or (%%char-upper-case? c)
       (%%char-lower-case? c)))
+(define (char-alphabetic? c)
+  (%%char-alphabetic? (%%check-char c)))
 
-(define (char-numeric? c)
-  (let ((n (char->integer c)))
+(define (%%char-numeric? c)
+  (let ((n (%%char->integer c)))
     (and (%%>= n 48) (%%<= n 57))))
+(define (char-numeric? c)
+  (%%char-numeric? (%%check-char c)))
 
 (define (char-whitespace? c)
   (let ((n (char->integer c)))
@@ -652,48 +664,52 @@
 	(%%= n 12)			;formfeed
 	(%%= n 13))))			;carriage return
 
-(define (char-upper-case? c)
-  (let ((n (char->integer c)))
+(define-integrable (%%char-upper-case? c)
+  (let ((n (%%char->integer c)))
     (and (%%>= n 65) (%%<= n 90))))
+(define (char-upper-case? c)
+  (%%char-upper-case? (%%check-char c)))
 
-(define (%%char-lower-case? c)
+(define-integrable (%%char-lower-case? c)
   (let ((n (%%char->integer c)))
     (and (%%>= n 97) (%%<= n 122))))
 (define (char-lower-case? c)
   (%%char-lower-case? (%%check-char c)))
   
-(define (%%char->integer c)
+(define-integrable (%%char->integer c)
   (foreign-inline "~a.val.charCodeAt(0)" c))
 (define (char->integer c)
   (%%char->integer (%%check-char c)))
 
-(define (%%integer->char n)
+(define-integrable (%%integer->char n)
   (foreign-inline "intern_char(String.fromCharCode(~a))" n))
 (define (integer->char n)
   (%%integer->char (%%check-integer n)))
 
-(define (%%char-upcase c)
+(define-integrable (%%char-upcase c)
   (if (%%char-lower-case? c)
       (%%integer->char (%%- (%%char->integer c) 32))
       c))
 (define (char-upcase c)
   (%%char-upcase (%%check-char c)))
 
-(define (char-downcase c)
-  (if (char-upper-case? c)
+(define-integrable (%%char-downcase c)
+  (if (%%char-upper-case? c)
       (%%integer->char (%%+ (%%char->integer c) 32))
       c))
+(define (char-downcase c)
+  (%%char-downcase (%%check-char c)))
 
-(define (string? obj)
+(define-integrable (string? obj)
   (foreign-inline "~a.constructor===SchemeString" obj))
 
 ;;; MAKE-STRING in runtime
 ;;; STRING in runtime
 
-(define (%%string-length s) (foreign-inline "~a.val.length" s))
+(define-integrable (%%string-length s) (foreign-inline "~a.val.length" s))
 (define (string-length s) (%%string-length (%%check-string s)))
 
-(define (%%string-ref s k)
+(define-integrable (%%string-ref s k)
   (foreign-inline "intern_char(~a.val.charAt(~a))" s k))
 (define (string-ref s k)
   (%%string-ref s (%%check-string-len s k)))
@@ -705,22 +721,28 @@
 
 (define-syntax string-comp
   (syntax-rules ()
-    ((_ unchecked-scheme-name scheme-name js-expr)
-     (define (unchecked-scheme-name s1 s2)
-       (foreign-inline js-expr s1 s2))
+    ((_ scheme-name js-expr)
      (define (scheme-name s1 s2)
-       (unchecked-scheme-name (%%check-string s1) (%%check-string s2))))))
+       (foreign-inline js-expr (%%check-string s1) (%%check-string s2))))
+    ((_ unchecked-scheme-name scheme-name js-expr)
+     (begin
+       (define-integrable (unchecked-scheme-name s1 s2)
+	 (foreign-inline js-expr s1 s2))
+       (define (scheme-name s1 s2)
+	 (unchecked-scheme-name (%%check-string s1) (%%check-string s2)))))))
 
 (string-comp %%string=? string=? "~a.val===~a.val")
 
-(define (string-ci=? s1 s2)
-  (let ((len (string-length s1)))
-    (and (%%= len (string-length s2))
+(define (%%string-ci=? s1 s2)
+  (let ((len (%%string-length s1)))
+    (and (%%= len (%%string-length s2))
 	 (let next ((i 0))
 	   (or (%%= i len)
 	       (and (%%char-ci=? (%%string-ref s1 i)
 				 (%%string-ref s2 i))
 		    (next (%%+ i 1))))))))
+(define (string-ci=? s1 s2)
+  (%%string-ci=? (%%check-string s1) (%%check-string s2)))
 
 (string-comp string<? "~a.val<~a.val")
 (string-comp string>? "~a.val>~a.val")
@@ -769,19 +791,19 @@
 
 ;;; STRING-FILL! in runtime
 
-(define (vector? obj)
+(define-integrable (vector? obj)
   (foreign-inline "~a.constructor===Array" obj))
 
 ;;; MAKE-VECTOR in runtime
 ;;; VECTOR in runtime
 
-(define (%%vector-length v) (foreign-inline "~a.length" v))
+(define-integrable (%%vector-length v) (foreign-inline "~a.length" v))
 (define (vector-length v) (%%vector-length (%%check-vector v)))
 
-(define (%%vector-ref v k) (foreign-inline "~a[~a]" v k))
+(define-integrable (%%vector-ref v k) (foreign-inline "~a[~a]" v k))
 (define (vector-ref v k) (%%vector-ref v (%%check-vector-len v k)))
 
-(define (%%vector-set! v k obj) (foreign-inline "~a[~a]=~a" v k obj))
+(define-integrable (%%vector-set! v k obj) (foreign-inline "~a[~a]=~a" v k obj))
 (define (vector-set! v k obj) (%%vector-set k (%%check-vector-len v k) obj))
 
 (define (%%vector->list v)
@@ -805,14 +827,14 @@
 ;;;
 ;;; PROCEDURES (control features)
 
-(define (procedure? obj)
+(define-integrable (procedure? obj)
   (foreign-inline "typeof(~a)==='function'" obj))
 
 ;;; APPLY in runtime
 
 (define (%%map proc list)
-  (let (map1 ((inlist list)
-	      (outlist '())))
+  (let map1 ((inlist list)
+	     (outlist '()))
     (if (null? inlist)
 	(%%reverse outlist)
 	(map1 (%%cdr inlist) (cons (proc (%%car inlist)) outlist)))))
@@ -866,15 +888,7 @@
 ;;; XXX not implemented yet:
 ;;;   eval scheme-report-environment null-environment interaction-environment
 
-;;; INPUT AND OUTPUT
-;;;
-;;; convert to proper form
-;;; Builtin are
-;;;   open-input-file open-output-file close-input-port close-output-port
-;;;   input-port? output-port?
-;;;   current-input-port current-output-port [with an arg, sets it, returns old]
-;;;   read-char peek-char eof-object? char-ready? write-char
-;;;
+
 (define (call-with-input-file str proc)
   (let ((p (open-input-file str)))
     (proc p)
@@ -889,148 +903,255 @@
   (or (input-port? p)
       (output-port? p)))
 
+(define-integrable (input-port? p)
+  (foreign-inline "~a.constructor===SchemeInputPort" p))
+
+(define-integrable (output-port? p)
+  (foreign-inline "~a.constructor===SchemeOutputPort" p))
+
+;;; the runtime must provide JS vars named
+;;; sinjs_current_input_port and sinks_current_output_port
+(define-integrable (current-input-port)
+  (foreign-inline "sinjs_current_input_port"))
+(define-integrable (current-output-port)
+  (foreign-inline "sinjs_current_output_port"))
+(define-integrable (%%set-current-input-port! p)
+  (foreign-inline "sinjs_current_input_port=~a" p))
+(define-integrable (%%set-current-output-port! p)
+  (foreign-inline "sinjs_current_output_port=~a" p))
+(define (set-current-input-port! p)
+  (%%set-current-input-port (%%check-input-port p)))
+(define (set-current-output-port! p)
+  (%%set-current-output-port (%%check-output-port p)))
+
+(define (%%close-input-port p)
+  (let ((closer (foreign-inline "~a.closefn" p)))
+    (if closer
+	(begin (foreign-inline "~a.closefn=~a" p #f)
+	       (foreign-inline "~a.readfn=~a" p #f)
+	       (foreign-inline "~a.peekfn=~a" p #f)
+	       (foreign-inline "~a.readyfn=~a" p #f)
+	       (foreign-inline "~a(~a)" closer p)))))
+
+(define (%%close-output-port p)
+  (let ((closer (foreign-inline "~a.closefn" p)))
+    (if closer
+	(begin (foreign-inline "~a.closefn=~a" p #f)
+	       (foreign-inline "~a.writefn=~a" p #f)
+	       (foreign-inline "~a(~a)" closer p)))))
+
+(define (close-input-port p)
+  (%%close-input-port (%%check-input-port p)))
+(define (close-output-port p)
+  (%%close-output-port (%%check-output-port p)))
+
 (define (with-input-from-file str proc)
   (call-with-input-file str (lambda (p)
-			      (let ((old (%%current-input-port p)))
+			      (let ((old (current-input-port)))
+				(%%set-current-input-port! p)
 				(proc)
-				(%%current-input-port old)))))
+				(%%set-current-input-port! old)))))
 
 (define (with-output-to-file str proc)
   (call-with-output-file str (lambda (p)
-			       (let ((old (%%current-output-port p)))
+			       (let ((old (current-output-port)))
+				 (%%set-current-output-port! p)
 				 (proc)
-				 (%%current-output-port old)))))
+				 (%%set-current-output-port! old)))))
 
-;;; Requires NULL? CURRENT-INPUT-PORT CAR PEEK-CHAR MEMV STRING-APPEND
-;;; STRING CHAR-DOWNCASE READ-CHAR LIST ERROR EQV? LIST->VECTOR 
-;;; CHAR-ALPHABETIC? CHAR-NUMERIC? CHAR=? NOT CONS STRING-REF STRING-CI=?
-;;; STRING-LENGTH STRING->NUMBER STRING->SYMBOL 
-#;(define (read . port*)
-  (let ((port (if (null? port*) (current-input-port) (car port*))))
-    (define gathered #f)
-    (define delimiters '(#\( #\) #\" #\' #\` #\,
-			 #\; #\space #\tab #\newline #\page #\return))
-    (define (read*)
-      (if gathered
-	  (let ((c (peek-char port)))
-	    (if (memv c delimiters)
-		(let ((tok (parse-long-token gathered)))
-		  (set! gathered #f)
-		  tok)
-		(begin
-		  (set! gathered 
-			(string-append gathered 
-				       (string (char-downcase 
-						(read-char port)))))
-		  (read*))))
-	  (let ((c (read-char port)))
-	    (case c
-	      ((#\() (read-list #t))
-	      ((#\)) (error read "unexpected list terminator"))
-	      ((#\") (read-string))
-	      ((#\') (list 'quote (read*)))
-	      ((#\`) (list 'quasiquote (read*)))
-	      ((#\,) (if (eqv? (peek-char port) #\@)
-			 (begin (read-char port)
-				(list 'unquote-splicing (read*)))
-			 (list 'unquote (read*))))
-	      ((#\#)
-	       (case (char-downcase (read-char port))
-		 ((#\t) #t)
-		 ((#\f) #f)
-		 ((#\() (list->vector (read-list #f)))
-		 ((#\\) (let ((c (read-char port)))
-			  (if (char-alphabetic? c)
-			      (begin (set! gathered  (string-append "#\\" c))
-				     (read*))
-			      (parse-long-token (string-append "#\\" c)))))
-		 ((#\i) (set! gathered "#i") (read*))
-		 ((#\e) (set! gathered "#e") (read*))
-		 ((#\b) (set! gathered "#b") (read*))
-		 ((#\o) (set! gathered "#o") (read*))
-		 ((#\d) (set! gathered "#d") (read*))
-		 ((#\x) (set! gathered "#x") (read*))
-		 (else (error read "impromper # syntax"))))
-	      ((#\space #\newline #\page #\tab #\return) (read*))
-	      ((#\;) (skip-comment) (read*))
-	      (else
-	       (if (or (char-alphabetic? c)
-		       (char-numeric? c)
-		       (memv c '(#\! #\$ #\% #\& #\* #\/ #\: #\< #\=
-				 #\> #\? #\^ #\_ #\~ #\+ #\- #\. #\@)))
-		   (begin (set! gathered (string (char-downcase c)))
-			  (read*))
-		   (error read 
-			  (string-append "unexpected character '" c "'"))))))))
+(define-integrable (%%read-char p)
+  (foreign-inline "~a.readfn(~a)" p p))
+(define (read-char . p*)
+  (if (null? p*)
+      (%%read-char (current-input-port))
+      (%%read-char (%%check-input-port (%%car p*)))))
 
-    ;; peek char, but skip white space on the way
-    (define (skip-white-peek)
-      (let ((c (peek-char port)))
+(define-integrable (%%peek-char p)
+  (foreign-inline "~a.peekfn(~a)" p p))
+(define (peek-char . p*)
+  (if (null? p*)
+      (%%peek-char (current-input-port))
+      (%%peek-char (%%check-input-port (%%car p*)))))
+
+(define-integrable (eof-object? obj)
+  (foreign-inline "~a===theEOF" obj))
+
+(define-integrable (%%char-ready? p)
+  (foreign-inline "~a.readyfn(~a)" p p))
+(define (char-ready? . p*)
+  (if (null? p*)
+      (%%char-ready? (current-input-port))
+      (%%char-ready? (%%check-input-port (%%car p*)))))
+
+(define-integrable (%%write-char c p)
+  (foreign-inline "~a.writefn(~a,~a)" p p c))
+(define (write-char c . p*)
+  (if (null? p*)
+      (%%write-char (%%check-char c) (current-output-port))
+      (%%write-char (%%check-char c) (%%check-output-port (%%car p*)))))
+
+(define (read . port*)
+  (%%read (if (null? port*) (current-input-port)
+	      (%%check-input-port (%%car port*)))))
+
+(define (%%read port)
+  (define gathered #f)
+  (define delimiters '(#\( #\) #\" #\' #\` #\,
+		       #\; #\space #\tab #\newline #\page #\return))
+  (define (read*)
+    (if gathered
+	(let ((c (%%peek-char port)))
+	  (if (or (eof-object? c) 
+		  (memv c delimiters))
+	      (let ((tok (parse-long-token gathered)))
+		(set! gathered #f)
+		tok)
+	      (begin
+		(set! gathered 
+		      (%%string-append gathered 
+				       (%%string (%%char-downcase 
+						  (%%read-char port)))))
+		(read*))))
+	(let ((c (%%read-char port)))
+	  (if (eof-object? c)
+	      c
+	      (case c
+		((#\() (read-list #t))
+		((#\)) (error read "unexpected list terminator"))
+		((#\") (read-string))
+		((#\') (quote-obj 'quote))
+		((#\`) (quote-obj 'quasiquote))
+		((#\,) (if (eqv? (%%peek-char port) #\@)
+			   (begin (%%read-char port)
+				  (quote-obj 'unquote-splicing))
+			   (quote-obj 'unquote)))
+		((#\#)
+		 (let ((tag (%%read-char port)))
+		   (if (eof-object? tag)
+		       (error read "eof after #")
+		       (case (%%char-downcase tag)
+			 ((#\t) #t)
+			 ((#\f) #f)
+			 ((#\() (%%list->vector (read-list #f)))
+			 ((#\\) 
+			  (let ((c (%%read-char port)))
+			    (cond
+			     ((eof-object? c)
+			      (error read "eof in character literal"))
+			     ((%%char-alphabetic? c)
+			      (begin 
+				(set! gathered  
+				      (%%string-append "#\\" (%%string c)))
+				(read*)))
+			     (else
+			      (parse-long-token
+			       (%%string-append "#\\" (%%string c)))))))
+			 ((#\i) (set! gathered "#i") (read*))
+			 ((#\e) (set! gathered "#e") (read*))
+			 ((#\b) (set! gathered "#b") (read*))
+			 ((#\o) (set! gathered "#o") (read*))
+			 ((#\d) (set! gathered "#d") (read*))
+			 ((#\x) (set! gathered "#x") (read*))
+			 (else (error read "impromper # syntax"))))))
+		((#\space #\newline #\page #\tab #\return) (read*))
+		((#\;) (skip-comment) (read*))
+		(else
+		 (if (or (%%char-alphabetic? c)
+			 (%%char-numeric? c)
+			 (memv c '(#\! #\$ #\% #\& #\* #\/ #\: #\< #\=
+				   #\> #\? #\^ #\_ #\~ #\+ #\- #\. #\@)))
+		     (begin (set! gathered (%%string (%%char-downcase c)))
+			    (read*))
+		     (error read 
+			    (%%string-append "unexpected character '" 
+					     (%%string c)
+					     "'")))))))))
+
+  (define (quote-obj mark)
+    (let ((obj (read*)))
+      (if (eof-object? obj)
+	  (error read (%%string-append "end of file in " 
+				       (%%symbol->string name)))
+	  (list mark obj))))
+	
+  ;; peek char, but skip white space on the way.
+  ;; called only from list syntax, so throw appropriate error if eof.
+  (define (skip-white-peek)
+    (let ((c (%%peek-char port)))
+      (cond
+       ((eof-object? c)
+	(error read "eof in list"))
+       ((memv c '(#\space #\tab #\newline #\page #\return))
+	(%%read-char port) 
+	(skip-white-peek))
+       ((%%char=? c #\;)
+	(skip-comment)
+	(skip-white-peek))
+       (else c))))
+  
+  (define (skip-comment)
+    (let ((c (%%read-char port)))
+      (if (and (not (eof-object? c))
+	       (not (%%char=? c #\newline)))
+	  (skip-comment))))
+
+  (define (read-list allow-improper-list)
+    (if (%%char=? (skip-white-peek) #\))
+	(begin (%%read-char port) 
+	       '())
+	(let ((a (read*)))
+	  ;; dotted lists are a pain!
+	  (if (%%char=? (skip-white-peek) #\.)
+	      (begin (%%read-char port)
+		     (if (or (eof-object? (%%peek-char port))
+			     (memv (%%peek-char port) delimiters))
+			 ;; legitimate dot
+			 (begin (if (not allow-improper-list)
+				    (error read "invalid vector syntax"))
+				(%%read-char port) ;consume delimiter
+				(let ((b (read*)))
+				  (if (eof-object? b)
+				      (error read "eof in list"))
+				  (skip-white-peek)
+				  (if (eof-object? (%%peek-char port))
+				      (error read "eof in list"))
+				  (if (not (%%char=? (%%read-char port) #\)))
+				      (error read "missing list terminator"))
+				  (cons a b)))
+			 ;; not really a dot, keep trying
+			 (begin (set! gathered ".")
+				(cons a (read-list allow-improper-list)))))
+	      (cons a (read-list allow-improper-list))))))
+
+  ;; parse a long token, defined specifically as a number, identifier,
+  ;; or character.
+  (define (parse-long-token str)
+    (if (and (%%char=? (%%string-ref str 0) #\#)
+	     (%%char=? (%%string-ref str 1) #\\))
 	(cond
-	 ((memv c (#\space #\tab #\newline #\page #\return))
-	  (read-char port) 
-	  (skip-white-peek))
-	 ((char=? c #\;)
-	  (skip-comment)
-	  (skip-white-peek))
-	 (else c))))
-    
-    (define (skip-comment)
-      (if (not (char=? (read-char port) #\newline))
-	  (skip-comment)))
+	 ((%%string-ci=? str "#\\newline") #\newline)
+	 ((%%string-ci=? str "#\\space") #\space)
+	 ((%%string-ci=? str "#\\return") #\return)
+	 ((%%string-ci=? str "#\\page") #\page)
+	 ((%%string-ci=? str "#\\tab") #\tab)
+	 (else (if (> (%%string-length str) 3)
+		   (error read
+			  (%%string-append "invalid character syntax " str))
+		   (%%string-ref str 2))))
+	(or (%%string->number str)
+	    (%%string->symbol str))))
 
-    (define (read-list allow-improper-list)
-      (if (char=? (skip-white-peek) #\))
-	  (begin (read-char port) '())
-	  (let ((a (read*)))
-	    ;; dotted lists are a pain!
-	    (if (char=? (skip-white-peek) #\.)
-		(begin (read-char port)
-		       (if (memv (peek-char port) delimiters)
-			   ;; legitimate dot
-			   (begin (if (not allow-improper-list)
-				      (error read "invalid vector syntax"))
-				  (read-char port) ;consume delimiter
-				  (let ((b (read*)))
-				    (skip-white-peek)
-				    (if (not (char=? (read-char port) #\)))
-					(error read "missing list terminator"))
-				    (cons a b)))
-			   ;; not really a dot, keep trying
-			   (begin (set! gathered ".")
-				  (cons a (read-list allow-improper-list)))))
-		(cons a (read-list allow-improper-list))))))
+  (define (read-string)
+    (let more ((str ""))
+      (let ((c (%%read-char port)))
+	(if (eof-object? c)
+	    (error read "eof in string")
+	    (case c
+	      ((#\\) (more (%%string-append str (%%string (%%read-char port)))))
+	      ((#\") str)
+	      (else (more (%%string-append str (%%string c)))))))))
 
-    ;; parse a long token, defined specifically as a number, identifier,
-    ;; or character.
-    (define (parse-long-token str)
-      (if (and (char=? (string-ref str 0) #\#)
-	       (char=? (string-ref str 1) #\\))
-	  (cond
-	   ((string-ci=? str "#\\newline") #\newline)
-	   ((string-ci=? str "#\\space") #\space)
-	   ((string-ci=? str "#\\return") #\return)
-	   ((string-ci=? str "#\\page") #\page)
-	   ((string-ci=? str "#\\tab") #\tab)
-	   (else (if (> (string-length str) 3)
-		     (error read
-			    (string-append "invalid character syntax " str))
-		     (string-ref str 2))))
-	  (or (string->number str)
-	      (string->symbol str))))
-
-    (define (read-string)
-      (let ((str ""))
-	(let more ((c (read-char port)))
-	  (case c
-	    ((#\\) 
-	     (set! str (string-append str (string (read-char port))))
-	     (more))
-	    ((#\") str)
-	    (else (set! str (string-append str c))
-		  (more))))))
-
-    (read*)))
+  (read*))
 
 (define (write obj . port*)
   (%%write obj (if (null? port*) 
@@ -1136,10 +1257,10 @@
   (foreign-inline "(function (){throw{name:~a,obj:~a,message:~a};})()"
 		  name obj (string->symbol message)))
 (define (type-error obj type-name)
-  (js-throw 'SINJStypeerror obj (%%string-append "not a " type-name)))
+  (js-throw 'SINJStypeerror obj (string-append "not a " type-name)))
 (define (length-error k name)
   (js-throw 'SINJSlengtherror k
-	    (%%string-append "out of bounds for access to " name)))
+	    (string-append "out of bounds for access to " name)))
 (define-syntax type-checker
   (syntax-rules ()
     ((_ scheme-name predicate? name)
@@ -1156,6 +1277,7 @@
 (type-checker %%check-char char? "character")
 (type-checker %%check-vector vector? "vector")
 (type-checker %%check-output-port output-port? "output port")
+(type-checker %%check-input-port input-port? "input port")
 
 (define-syntax length-checker
   (syntax-rules ()
@@ -1175,3 +1297,6 @@
       (length-error start "string"))
   (if (%%> end (string-length s))
       (length-error end "string")))
+
+(define (error name str)
+  (js-throw 'SINJSerror name str))
