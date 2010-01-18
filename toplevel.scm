@@ -48,12 +48,13 @@
 	  ((begin)
 	   (apply values (map-values prepare (cdr form))))
 
-	  ((define)
+	  ((define-integrable define)
 	   ;; turn into set! as per R5RS
 	   (let* ((d (clean-define form))
 		  (name (identifier->name (cadr d)))
 		  (val (expand (caddr d) top-level-environment)))
-	     (if (and (list? val)
+	     (if (and (eq? (identifier->name (car form)) 'define-integrable)
+		      (list? val)
 		      (identifier? (car val))
 		      (eq? (identifier->name (car val)) 'lambda))
 		 (mark-integrable name val))
@@ -79,18 +80,17 @@
 	  integrables))
 
 (define (simp a b c)
-  (write a) (newline)
   (simplify a b c))
 ;;; compile a bunch of top-level forms into a list of JavaScript
 ;;; expressions.  
 (define (compile-many forms)
   ;; First do everything but code-gen
-  (let* ((orig-forms forms)
-	 (forms (map-values prepare forms))
+  (let* ((forms (map-values prepare forms))
+	 (prepped-forms forms)
 	 (foo (display "done preparing\n"))
 	 (global-set!s (find-global-modifications forms))
 	 (integrables (prune-integrables *integrable-procedures* global-set!s))
-	 ;(forms (map (cut perform-integrations <> integrables) forms))
+	 (forms (map (cut perform-integrations <> integrables) forms))
 	 (foo (display "done integrating\n"))
 	 (local-set!s (find-local-modifications forms))
 	 (forms (map (cut cps-transform <> 'top_k) forms))
@@ -100,7 +100,7 @@
     ;; Find the references inside these forms
     (let-values (((mandatory-refs conditional-refs)
 		  (find-references forms)))
-      (let ((forms (prune-top-level forms orig-forms 
+      (let ((forms (prune-top-level forms prepped-forms 
 				    mandatory-refs conditional-refs)))
 	(map compile-form forms)))))
 
@@ -208,7 +208,7 @@
 	     (find-references val))))
       (else (let-values (((mand1 opt1) (find-references (car form)))
 			 ((mand2 opt2) (find-references (cdr form))))
-	      (values (append mand1 mand2) (merge-alists opt1 opt2))))))
+	      (values (lset-union eq? mand1 mand2) (merge-alists opt1 opt2))))))
    (else (error find-references "bad form"))))
 
 ;;; not very efficient, but clear
@@ -219,7 +219,7 @@
   (if (null? a1)
       a2
       (let ((first-key (caar a1)))
-	(cons (append (cons first-key (cdar a1)) (ref first-key a2))
+	(cons (cons first-key (lset-union eq? (cdar a1) (ref first-key a2)))
 	      (merge-alists (cdr a1) (remove (lambda (p) (eq? (car p) first-key))
 					     a2))))))
 
