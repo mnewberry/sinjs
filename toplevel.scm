@@ -28,14 +28,15 @@
 
 ;;; compile top-level forms into a Javascript program.
 (define (top-level-compile-forms forms)
-  (let ((prepared-forms (map-values prepare forms)))
-    (let-values (((global-set!s local-set!s)
-		  (find-modifications prepared-forms)))
-      (string-append (sinjs-prologue)
-		     (make-top-level-table
-		      (map (cut top-level-compile <> global-set!s local-set!s) 
-			   prepared-forms))
-		     (sinjs-epilogue)))))
+  (string-append (sinjs-prologue)
+		 (make-top-level-table (compile-many forms))
+		 (sinjs-epilogue)))
+
+;;; Maintain a list of integrable procedures
+(define *integrable-procedures* '())
+(define (mark-integrable name lambda-expr)
+  (set! *integrable-procedures*
+	(cons (cons name lambda-expr) *integrable-procedures*)))
 
 ;;; expand syntax first, check for top-level keywords, wrap
 ;;; in a procedure, and do a full expansion.
@@ -45,14 +46,18 @@
 	     (identifier? (car form)))
 	(case (identifier->name (car form))
 	  ((begin)
-	   (apply values (map-in-order prepare (cdr form))))
+	   (apply values (map-values prepare (cdr form))))
 
 	  ((define)
-	   ;; turn into a set! as per R5RS 5.2.1.
-	   (let ((d (clean-define form)))
-	     `(lambda () 
-		(top-level-set! ,(identifier->name (cadr d))
-				,(expand (caddr d) top-level-environment)))))
+	   ;; turn into set! as per R5RS
+	   (let* ((d (clean-define form))
+		  (name (identifier->name (cadr d)))
+		  (val (expand (caddr d) top-level-environment)))
+	     (if (and (list? val)
+		      (identifier? (car val))
+		      (eq? (identifier->name (car val)) 'lambda))
+		 (mark-integrable name val))
+	     `(top-level-set! ,name ,(expand (caddr d) top-level-environment))))
 
 	  ((define-syntax)
 	   (unless (and (list? form)
@@ -65,38 +70,48 @@
 	   (values))
 	  
 	  (else
-	   (expand `(lambda () ,form) top-level-environment)))
-	(expand `(lambda () ,form) top-level-environment))))
+	   (expand form top-level-environment)))
+	(expand form top-level-environment))))
 
-;;; top_level_return is a JS function which just returns its
-;;; argument.  Since FORM is a lamba expression, this means the
-;;; return of TOP-LEVEL-COMPILE is a JS code fragment which 
-;;; evaluates to a procedure.
-#;(define (top-level-compile form unsafes)
-  (let ((continuation 'top_level_return))
-    (compile-form (simplify (cps-transform form continuation) unsafes))))
+(define (prune-integrables integrables global-set!s)
+  (remove (lambda (integrable) 
+	    (memq (car integrable) global-set!s))
+	  integrables))
 
-;;; while simplification does introduce variables, it never renames
-;;; or introduces set! or top-level-set!, so the list of assignments
-;;; from the preparation step is ok.
-(define (top-level-compile form global-set!s local-set!s)
-  (let* ((continuation 'top_level_return)
-	 (transformed (cps-transform form continuation))
-	 (simplified (simplify transformed global-set!s local-set!s))
-	 (compiled (compile-form simplified)))
-    #;(display (format "start form ~a\n" form))
-    #;(display (format "after CPS ~a\n" transformed))
-    #;(display (format "after simp ~a\n" simplified))
-    compiled))
+(define (simp a b c)
+  (write a) (newline)
+  (simplify a b c))
+;;; compile a bunch of top-level forms into a list of JavaScript
+;;; expressions.  
+(define (compile-many forms)
+  ;; First do everything but code-gen
+  (let* ((orig-forms forms)
+	 (forms (map-values prepare forms))
+	 (foo (display "done preparing\n"))
+	 (global-set!s (find-global-modifications forms))
+	 (integrables (prune-integrables *integrable-procedures* global-set!s))
+	 ;(forms (map (cut perform-integrations <> integrables) forms))
+	 (foo (display "done integrating\n"))
+	 (local-set!s (find-local-modifications forms))
+	 (forms (map (cut cps-transform <> 'top_k) forms))
+	 (foo (display "done transforming\n"))
+	 (forms (map (cut simp <> global-set!s local-set!s) forms)))
+    (display "done simplifying\n")
+    ;; Find the references inside these forms
+    (let-values (((mandatory-refs conditional-refs)
+		  (find-references forms)))
+      (let ((forms (prune-top-level forms orig-forms 
+				    mandatory-refs conditional-refs)))
+	(map compile-form forms)))))
 
-;;; Take a series of strings, each which evaluates to a JS function,
-;;; and generate JS code that puts them in a table.
+;;; Take a series of strings of JS expressions, and generate JS code
+;;; that puts them in a table of functions.
 (define (make-top-level-table frags)
   (let ((tablevars (map (lambda (ignored) (uniquify 'toplev)) frags)))
     (string-append
      (apply string-append 
 	    (map (lambda (var frag)
-		   (string-append (symbol->string var) " = " frag ";\n"))
+		   (string-append (symbol->string var) " = function(top_k){return function () {return " frag ";};};\n"))
 		 tablevars frags))
      "scheme_top_level_table = ["
      (apply string-append
@@ -104,52 +119,143 @@
 		 tablevars))
      
      "scheme_top_level_done"
-     "];")))
+     "];\n")))
 
-;;; return a list of top-level variables bound by the specified forms
-#;(define (find-bindings forms)
-  (cond
-   ((null? forms) '())
-   ((not (pair? (car forms))) (find-bindings (cdr forms)))
-   ((eq? (caar forms) 'begin) (append (find-bindings (cdar forms))
-				      (find-bindings (cdr forms))))
-   ((eq? (caar forms) 'define) (cons (cadar forms)
-				     (find-bindings (cdr forms))))
-   (else (find-bindings (cdr forms)))))
+
+;;; find global modifications in a list of top-level forms.  if it's a
+;;; a top-level-set!, it doesn't count as a modification if it
+;;; occurs only once.
+(define (find-global-modifications forms)
+  (let ((globals-defined '()))
+    (let find-all-modifications* ((forms forms))
+      (if (null? forms)
+	  '()
+	  (let ((form (car forms)))
+	    (if (and (list? form)
+		     (eq? 'top-level-set! (car form))
+		     (not (memq (cadr form) globals-defined)))
+		(begin
+		  (set! globals-defined (cons (cadr form) globals-defined))
+		  (append (find-modifications (caddr form) 'top-level-set!)
+			  (find-global-modifications (cdr forms))))
+		(append (find-modifications form 'top-level-set!)
+			(find-global-modifications (cdr forms)))))))))
+
+(define (find-local-modifications forms)
+  (find-modifications forms 'set!))
 
 ;;; works on a list of forms, or a single form, because
-;;; of the rule for combinations.  return two values:
-;;; first, list of targets of top-level-set!, second, list
-;;; of targets of set!.
-(define (find-modifications form)
-  (define (empty) (values '() '()))
+;;; of the rule for combinations.  setter is either set! or
+;;; top-level-set!, depending on what kind of modifications we're
+;;; looking for.
+(define (find-modifications form setter)
   (cond
-   ((null? form) (empty))
-   ((symbol? form) (empty))
+   ((null? form) '())
+   ((symbol? form) '())
    ((pair? form)
     (case (car form)
-      ((quote top-level-ref) (empty))
-      ((set!) (let-values (((global local)
-			    (find-modifications (caddr form))))
-		(values global (cons (cadr form) local))))
-      ((begin) (find-modifications (cdr form)))
-      ((lambda) (find-modifications (cddr form)))
-      ((foreign-inline) (find-modifications (cddr form)))
-      ((top-level-set!) (let-values (((global local)
-				      (find-modifications (caddr form))))
-			  (values (cons (cadr form) global) local)))
-      ((if) (let-values (((global1 local1) (find-modifications (cadr form)))
-			 ((global2 local2) (find-modifications (caddr form)))
-			 ((global3 local3) (find-modifications (cadddr form))))
-	      (values (append global1 global2 global3)
-		      (append local1 local2 local3))))
-      (else (let-values (((global1 local1) (find-modifications (car form)))
-			 ((global2 local2) (find-modifications (cdr form))))
-	      (values (append global1 global2) (append local1 local2))))))
+      ((quote top-level-ref) '())
+      ((set!) (if (eq? setter 'set!)
+		  (cons (cadr form) (find-modifications (caddr form) setter))
+		  (find-modifications (caddr form) setter)))
+      ((begin) (find-modifications (cdr form) setter))
+      ((lambda) (find-modifications (cddr form) setter))
+      ((foreign-inline) (find-modifications (cddr form) setter))
+      ((top-level-set!) (if (eq? setter 'top-level-set!)
+			    (cons (cadr form) (find-modifications (caddr form)
+								  setter))
+			    (find-modifications (caddr form) setter)))
+      ((if) (append (find-modifications (cadr form) setter)
+		    (find-modifications (caddr form) setter)
+		    (find-modifications (cadddr form) setter)))
+      (else (append (find-modifications (car form) setter)
+		    (find-modifications (cdr form) setter)))))
    (else (error find-modifications (format "bad form ~a\n" form)))))
-					
-(define (sinjs-prologue)
-;  "")
-  (read-all "runtime.js"))
 
-(define (sinjs-epilogue) "")
+;;; Find references inside a form or list of forms.  
+;;; Return two values. First, a list of mandatory top-level variables.
+;;; Second, an alist mapping top-level names to the top-level variables
+;;; they conditionally require.
+;;; A mandatory top-level reference is one which we must emit, because
+;;; it is used by a top-level form directly.  A conditional reference
+;;; is one for a definition we need to emit only if some other form
+;;; is needed.  Thus, (define (x) ...) at top level doesn't need to be
+;;; emitted unless some code somewhere has a reference to X.  If that 
+;;; code is inside (define (y) (x ...)) then the reference is conditional
+;;; upon Y.  Later walking this graph in prune-top-level will eliminate
+;;; all the top-level-definitions we determine are unnecessary.
+(define (find-references form)
+  (cond
+   ((null? form) (values '() '()))
+   ((symbol? form) (values '() '()))
+   ((pair? form)
+    (case (car form)
+      ((set!) (find-references (caddr form)))
+      ((quote) (values '() '()))
+      ((foreign-inline) (find-references (cddr form)))
+      ((lambda) (find-references (cddr form)))
+      ((if) (find-references (cdr form)))
+      ((top-level-ref) (values (list (cadr form)) '())) ;mandatory
+      ((top-level-set!)
+       (let ((name (cadr form))
+	     (val (caddr form)))
+	 (if (and (list? val)
+		  (eq? (car val) 'lambda))
+	     (let-values (((mand opt) (find-references val)))
+	       ;; all "mandatory" references inside this lambda
+	       ;; are conditional on NAME
+	       (values '() (merge-alists (list (cons name mand)) opt)))
+	     (find-references val))))
+      (else (let-values (((mand1 opt1) (find-references (car form)))
+			 ((mand2 opt2) (find-references (cdr form))))
+	      (values (append mand1 mand2) (merge-alists opt1 opt2))))))
+   (else (error find-references "bad form"))))
+
+;;; not very efficient, but clear
+(define (merge-alists a1 a2)
+  (define (ref sym a)
+    (let ((p (assq sym a)))
+      (if p (cdr p) '())))
+  (if (null? a1)
+      a2
+      (let ((first-key (caar a1)))
+	(cons (append (cons first-key (cdar a1)) (ref first-key a2))
+	      (merge-alists (cdr a1) (remove (lambda (p) (eq? (car p) first-key))
+					     a2))))))
+
+;;; identify and remove forms which we don't need to emit.
+(define (prune-top-level forms orig-forms mandatory conditional)
+  (let ((mandatory (propogate-mandatory mandatory conditional)))
+    (filter-map
+     (lambda (form orig-form)
+       ;; if it's (top-level-set! xxx yyy) then maybe prune
+       (if (and (list? orig-form)
+		(eq? (car orig-form) 'top-level-set!))
+	   (and (memq (cadr orig-form) mandatory) form)
+	   form))
+     forms orig-forms)))
+
+(define (propogate-mandatory mandatory conditional)
+  ;; for each thing in MANDATORY, check and see if anything
+  ;; is conditional on it, and add those things to mandatory,
+  ;; and recurse.
+  (let propogate ((mandatory mandatory))
+    (let ((new-mands (lset-difference eq?
+				      (apply append
+					     (map (lambda (sym) 
+						    (let ((p (assq sym conditional)))
+						      (if p (cdr p) '())))
+						  mandatory))
+				      mandatory)))
+      (if (null? new-mands)
+	  mandatory
+	  (propogate (append new-mands mandatory))))))
+
+(define (sinjs-prologue)
+  (string-append
+   (read-all "runtime.js")
+   (read-all "rhino.js")
+   "rhino_initialize();\n"))
+
+(define (sinjs-epilogue) 
+  "scheme_top_level ();\n")

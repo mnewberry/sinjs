@@ -20,5 +20,40 @@ Extensions to the Scheme language for sinjs.
   (define (sin x)
     (foreign-inline "Math.sin(~a)" (number->jsnum x)))
 
+(foreign-lambda (ARG ...) CODE)
+  Returns a procedure whose source code is in Javascript.  The ARG ... 
+  parameters must be a list of identifiers in legitimate JavaScript
+  syntax (only letters, digits, and _ allowed), and CODE must be a literal
+  string.  Write as if the body of a normal JavaScript function.  Use
+  "return" to specify a return value.  For example:
 
+  ((foreign-lambda (x y) "var a = x+y; if (x > 0) return a; else return 0;")
+   3 5)
+    => 8
+  
+(foreign-lambda-cps (CONT ARG ...) CODE)
+  Just like foreign-lambda, but the procedure is called in primitive
+  continuation-passing style.  The parameter CONT must be called with
+  the return value of the function.
+  For example this does the same as the preceding example:
+  ((foreign-primitive (k x y) 
+    "var a=x+y; if (x>0) return k(a); else return k(0);")
+   3 5)
+    => 8
+
+Scheme procedures have a different calling structure from normal JavaScript 
+functions, so you should not directly call a Scheme procedure from JavaScript.
+(You may be tempted to do so, because a Scheme procedure is implemented as
+a JavaScript object, but please don't!  The calling semantic is tricky.)
+
+Instead, use the following wrapper, which makes sure to honor the Scheme
+stack rules:
+
+callScheme(proc, arg ...)
+
+This calls a Scheme procedure with the specified arguments.  The Scheme
+procedure must not return more than once or an error will be raised:
+implicit JavaScript continuations cannot be invoked more than once, so
+if PROC saves its continuation and executes it a second time, there will be
+no way to invoke callScheme's continuation a second time.
 

@@ -2,6 +2,8 @@
 
 (use (srfi 1))
 
+(define reds 0)
+
 ;;; if global-set!s is #f, then make no assumptions about global
 ;;; assignments.
 (define (simplify form global-set!s local-set!s)
@@ -71,8 +73,8 @@
 	   `(lambda ,args ,(simplify-1 value))))
 
 	(else
-	 (let ((procedure (car form))
-	       (args (cdr form)))
+	 (let ((procedure (simplify-1 (car form)))
+	       (args (map simplify-1 (cdr form))))
 	   (cond
 	    ;; if the operator position is a literal procedure, perhaps
 	    ;; we can do a beta reduction.
@@ -85,15 +87,28 @@
 	     #;(display (format "form ~s\n" form))
 	     #;(display (format "reducing with ~s\n\n"
 			      (map cons (cadr procedure) args)))
-	     (beta-reduce (caddr procedure) 
-			  (map cons (cadr procedure) args)))
-	    
-	    (else (map simplify-1 form)))))))))
+	     (set! reds (+ reds 1))
+	     ;; try reduction; abandon if code size goes up
+	     (let ((b (beta-reduce (caddr procedure) 
+			  (map cons (cadr procedure) args))))
+	       (if (> (complexity b) (complexity form))
+		   form
+		   b)))
 
+	    (else (cons procedure args)))))))))
+
+  (set! reds 0)
+  (display (format "comp -> ~s\n" (complexity form)))
   (let ((f (simplify-1 form)))
+    (display (format "reds: ~s\n\n" reds))
     (if (equal? f form)
 	form
 	(simplify f global-set!s local-set!s))))
+
+(define (complexity form)
+  (if (list? form)
+      (apply + (length form) (map complexity form))
+      1))
 
 ;;; We can beta reduce if every argument fits any of the following tests:
 ;;;   Actual parm is any constant (QUOTE or LAMBDA)

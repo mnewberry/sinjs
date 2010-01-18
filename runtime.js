@@ -103,13 +103,9 @@ function sinjs_start_stack (proc) {
 }
 
 // top level execution
-// used as a continuation for storing top-level procedures in the array
-// of top-level forms to execute.
-function top_level_return (value){return value;};
-
 // execute the Nth top-level procedure and proceed to the N+1th after.
 function top_level_run (n) {
-    return (scheme_top_level_table[n])(function (){top_level_run(n+1);});
+    return function () {return (scheme_top_level_table[n])(function (){return top_level_run(n+1);});};
 }
 
 function scheme_top_level() {
@@ -147,13 +143,8 @@ function sinjs_repl_execute(fun) {
 // continuation for forms pumped to top level repl.  write the result;
 // then a newline, then throw out to the top.
 
-// execute the top-level function in repl
-function sinjs_repl_k(fun) {
-    return sinjs_repl_execute(function () {return fun(sinjs_repl_print_answer);});
-};
-
 // k for top level functions in repl: print answer, then escape
-function sinjs_repl_print_answer(answer) {
+function sinjs_repl_k(answer) {
     return function () {return (top_level_binding['write'])(sinjs_repl_print_newline, answer);};
 }
 
@@ -162,8 +153,8 @@ function sinjs_repl_print_newline(ignored) {
 };
 
 // execute the top-level function for library code in repl (don't print answer)
-function sinjs_repl_noprint_k(fun) {
-    return sinjs_repl_execute(function () {return fun(scheme_top_level_done);});
+function sinjs_repl_noprint_k(answer) {
+    return function () {scheme_top_level_done(answer)};
 };
 
 //

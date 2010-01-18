@@ -3,7 +3,6 @@
 (use (srfi 1))
 
 (define (compile-form form)
-
   (define (compile-formals formals)
     (cond
      ((null? formals) "")
@@ -94,7 +93,6 @@
 	((foreign-inline)
 	 (let ((code (cadr form))
 	       (args (cddr form)))
-	   (display (format "inlining: ~s\n" form))
 	   (apply format code 
 		  (map (lambda (arg)
 			 (string-append "(" (compile-1 arg) ")"))
@@ -115,7 +113,7 @@
 	 (let ((test (cadr form))
 	       (true-branch (caddr form))
 	       (false-branch (cadddr form)))
-	   (string-append "(" (compile-1 test) ")!=false?(" 
+	   (string-append "(" (compile-1 test) ")!==false?(" 
 			  (compile-1 true-branch) "):(" 
 			  (compile-1 false-branch) ")")))
 

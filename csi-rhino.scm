@@ -27,7 +27,9 @@
 			(find-modifications (list transformed))))
 	    (let ((compiled (compile-form (simplify transformed
 						    '() l-set!s))))
-	      (send-out (string-append compiled ";"))))))
+	      ;(display compiled) (newline)
+	      (send-out
+	       (format "sinjs_repl_execute (function () {return ~a;});" compiled))))))
 
       (define (compile-and-run form k)
 	(let-values ((forms (prepare form)))

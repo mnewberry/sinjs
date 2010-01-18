@@ -140,6 +140,11 @@
 ;;; Procedure definitions
 ;;;
 
+;;;
+;;; Names: Anything with a %% is a version with
+;;; unchecked arguments, and does not accept 
+;;; variable numbers of arguments.
+
 ;;; PROCEDURES (equivalence)
 
 (define (eq? x y)
@@ -151,18 +156,18 @@
   (or (eqv? a b)
       (and (pair? a)
 	   (pair? b)
-	   (equal? (car a) (car b))
-	   (equal? (cdr a) (cdr b)))
+	   (equal? (%%car a) (%%car b))
+	   (equal? (%%cdr a) (%%cdr b)))
       (and (vector? a)
 	   (vector? b)
-	   (= (vector-length a) (vector-length b))
+	   (= (%%vector-length a) (%%vector-length b))
 	   (let next-elt ((i 0))
-	     (or (= i (vector-length a))
-		 (and (equal? (vector-ref a i) (vector-ref b i))
-		      (next-elt (+ i 1))))))
+	     (or (%%= i (%%vector-length a))
+		 (and (equal? (%%vector-ref a i) (%%vector-ref b i))
+		      (next-elt (%%+ i 1))))))
       (and (string? a)
 	   (string? b)
-	   (string=? a b))))
+	   (%%string=? a b))))
 
 ;;;
 ;;; PROCEDURES (numbers)
@@ -192,187 +197,212 @@
 (define rational? number?)
 (define (integer? obj)
   (and (number? obj)
-       (= obj (floor obj))))
+       (%%integer? obj)))
+(define (%%integer? obj)
+  (%%=obj (%%floor obj)))
 
 (define (exact? z) #f)
 (define (inexact? z) #t)
 
 (define-syntax num-compare
   (syntax-rules ()
-    ((_ scheme-name js-expr)
-     (define (scheme-name z1 z2 . zs)
-       (and (foreign-inline js-expr (%%check-number z1) (%%check-number z2))
-	    (or (null? zs)
-		(apply scheme-name z2 zs)))))))
-(num-compare = "~a===~a")
-(num-compare < "~a<~a")
-(num-compare > "~a>~a")
-(num-compare <= "~a<=~a")
-(num-compare >= "~a>=~a")
+    ((_ unchecked-scheme-name scheme-name js-expr)
+     (begin
+       (define (unchecked-scheme-name z1 z2)
+	 (foreign-inline js-expr z1 z2))
+       (define (scheme-name z1 z2 . zs)
+	 (and (unchecked-scheme-name (%%check-number z1) (%%check-number z2))
+	      (or (null? zs)
+		  (%%apply scheme-name z2 zs))))))))
+(num-compare %%= = "~a===~a")
+(num-compare %%< < "~a<~a")
+(num-compare %%> > "~a>~a")
+(num-compare %%<= <= "~a<=~a")
+(num-compare %%>= >= "~a>=~a")
 
-(define (zero? z)
-  (= z 0))
-(define (positive? x)
-  (> x 0))
-(define (negative? x)
-  (< x 0))
-(define (odd? n)
-  (= 1 (remainder n 2)))
-(define (even? n)
-  (= 0 (remainder n 2)))
+(define (zero? z) (= z 0))
+(define (positive? x) (> x 0))
+(define (negative? x) (< x 0))
+(define (odd? n) (%%= 1 (remainder n 2)))
+(define (even? n) (%%= 0 (remainder n 2)))
+
+(define (%%zero? z) (%%= z 0))
+(define (%%positive? x) (%%> x 0))
+(define (%%negative? x) (%%< x 0))
+(define (%%even? x) (%%= 0 (%%remainder n 2)))
 
 (define (max z1 . zs)
   (let loop ((l zs)
 	     (top z1))
     (cond
      ((null? l) top)
-     ((> (car l) top) (loop (cdr l) (car l)))
-     (else (loop (cdr l) top)))))
+     ((> (%%car l) top) (loop (%%cdr l) (%%car l)))
+     (else (loop (%%cdr l) top)))))
 
 (define (min z1 . zs)
   (let loop ((l zs)
 	     (bottom z1))
     (cond
      ((null? l) bottom)
-     ((< (car l) bottom) (loop (cdr l) (car l)))
-     (else (loop (cdr l) bottom)))))
+     ((< (%%car l) bottom) (loop (%%cdr l) (%%car l)))
+     (else (loop (%%cdr l) bottom)))))
+
+(define (%%min z1 z2)
+  (if (%%< z1 z2) z1 z2))
 
 (define-syntax comm-op
   (syntax-rules ()
-    ((_ scheme-name base-val js-expr)
-     (define (scheme-name . zs)
-       (cond
-	((null? zs) base-val)
-	((null? (cdr zs)) (%%check-number (car zs)))
-	(else  (apply scheme-name
-		      (foreign-inline js-expr 
-				      (%%check-number (car zs))
-				      (%%check-number (cadr zs)))
-		      (cddr zs))))))))
-(comm-op + 0 "~a+~a")
-(comm-op * 1 "~a*~a")
+    ((_ unchecked-scheme-name scheme-name base-val js-expr)
+     (begin
+       (define (unchecked-scheme-name z1 z2)
+	 (foreign-inline js-expr z1 z2))
+       (define (scheme-name . zs)
+	 (cond
+	  ((null? zs) base-val)
+	  ((null? (%%cdr zs)) (%%check-number (%%car zs)))
+	  (else  (%%apply scheme-name
+			(unchecked-scheme-name z1 z2)
+			(%%cddr zs)))))))))
+(comm-op %%+ + 0 "~a+~a")
+(comm-op %%* * 1 "~a*~a")
 
 (define-syntax dim-op
   (syntax-rules ()
-    ((_ scheme-name unary-js-expr binary-js-expr)
-     (define (scheme-name z1 . zs)
-       (if (null? zs)
-	   (foreign-inline unary-js-expr (%%check-number z1))
-	   (let ((first  (foreign-inline binary-js-expr 
-					 (%%check-number z1)
-					 (%%check-number (car zs)))))
-	     (if (null? (cdr zs))
-		 first
-		 (apply scheme-name first (cdr zs)))))))))
-(dim-op - "-~a" "~a-~a")
-(dim-op / "1/~a" "~a/~a")
+    ((_ unchecked-scheme-name scheme-name unary-js-expr binary-js-expr)
+     (begin
+       (define (unchecked-scheme-name z1 z2)
+	 (foreign-inline binary-js-expr z1 z2))
+       (define (scheme-name z1 . zs)
+	 (if (null? zs)
+	     (foreign-inline unary-js-expr (%%check-number z1))
+	     (let ((first (unchecked-scheme-name (%%check-number z1)
+						 (%%check-number (%%car zs)))))
+	       (if (null? (%%cdr zs))
+		   first
+		   (%%apply scheme-name first (%%cdr zs)))))))))
+(dim-op %%- - "-~a" "~a-~a")
+(dim-op %%/ / "1/~a" "~a/~a")
 
-(define (abs z)
-  (foreign-inline "Math.abs(~a)" (%%check-number z)))
+(define (abs z) (%%abs (%%check-number z)))
+(define (%%abs z) (foreign-inline "Math.abs(~a)" z))
 
 ;;; JS has no builtin integer division!
 (define (quotient n1 n2)
-  (/ (- n1 (remainder n1 n2)) n2))
+  (%%check-number n1)
+  (%%check-number n2)
+  (%%/ (%%- n1 (%%remainder n1 n2)) n2))
 
+(define (%%remainder n1 n2)
+  (foreign-inline "~a%~a" n1 n2))
 (define (remainder n1 n2)
-  (foreign-inline "~a%~a" (%%check-integer n1) (%%check-integer n2)))
+  (%%remainder (%%check-integer n1) (%%check-integer n2)))
 
 (define (modulo n1 n2)
   (let ((r (remainder n1 n2)))
     (cond
-     ((and (negative? n2) (positive? r))
-      (- r n2))
-     ((and (positive? n2) (negative? r))
-      (+ r n2))
+     ((and (%%negative? n2) (%%positive? r))
+      (%%- r n2))
+     ((and (%%positive? n2) (%%negative? r))
+      (%%+ r n2))
      (else r))))
 
+(define (%%gcd a b)
+  (if (%%zero? b)
+      (%%abs a)
+      (%%gcd b (%%remainder a b))))
+
 (define (gcd . ns)
-  (define (gcd* a b)
-    (if (zero? b)
-	(abs a)
-	(gcd* b (remainder a b))))
   (let next ((ns ns) (g 0))
     (if (null? ns)
 	g
-	(next (cdr ns) (gcd* g (car ns))))))
+	(next (%%cdr ns) (%%gcd g (%%check-number (%%car ns))))))
 
 (define (lcm . ns)
   (define (lcm* a b)
-    (* (/ (abs a) (gcd a b)) (abs b)))
+    (%%* (%%/ (%%abs a) (%%gcd a b)) (%%abs b)))
   (let next ((ns ns) (m 1))
     (if (null? ns)
 	m
-	(next (cdr ns) (lcm* m (car ns))))))
+	(next (%%cdr ns) (lcm* m (%%check-number (%%car ns))))))
 
 (define (denominator q)
   ;; assume we're dealing with binary floating point
   ;; and search for the right denominator.
-  (if (integer? q)
+  (if (%%integer? (%%check-number q))
       1
       (let next-ub-guess ((ub 1))
-	(if (integer? (* q ub))
+	(if (%%integer? (%%* q ub))
 	    (let next-search ((lb 1)
 			      (ub ub))
 	      ;; binary search for the minimal denominator
 	      ;; invariant: LB is too small; UB is (maybe) too big
-	      (if (= ub (+ lb 1))
+	      (if (%%= ub (%%+ lb 1))
 		  ub
-		  (let ((midpoint (if (even? (- ub lb))
-				      (+ lb (/ (- ub lb) 2))
-				      (+ lb (/ (- ub lb) 2) -0.5))))
-		    (if (integer? (* q midpoint))
+		  (let ((midpoint (if (%%even? (%%- ub lb))
+				      (%%+ lb (%%/ (%%- ub lb) 2))
+				      (%%+ lb (%%/ (%%- ub lb) 2) -0.5))))
+		    (if (%%integer? (%%* q midpoint))
 			(next-search lb midpoint)
 			(next-search midpoint ub)))))
-	    (next-ub-guess (* ub 2))))))
+	    (next-ub-guess (%%* ub 2))))))
 
 (define (numerator q)
-  (* (denominator q) q))
+  (%%* (denominator q) q))
 
 (define-syntax unary-math-op
   (syntax-rules ()
-    ((_ scheme-name js-expr)
-     (define (scheme-name x)
-       (foreign-inline js-expr (%%check-number x))))))
+    ((_ checked-scheme-name js-expr)
+     (define (checked-scheme-name x)
+       (foreign-inline js-expr (%%check-number x))))
+    ((_ unchecked-scheme-name checked-scheme-name js-expr)
+     (begin
+       (define (unchecked-scheme-name x)
+	 (foreign-inline js-expr x))
+       (define (checked-scheme-name x)
+	 (unchecked-scheme-name (%%check-number x)))))))
 
-(unary-math-op floor "Math.floor(~a)")    
-(unary-math-op ceiling "Math.ceil(~a)")
+(unary-math-op %%floor floor "Math.floor(~a)")    
+(unary-math-op %%ceiling ceiling "Math.ceil(~a)")
 
 (define (truncate x)
+  (%%check-number x)
   (cond
-   ((positive? x) (floor x))
-   ((negative? x) (ceiling x))
+   ((%%positive? x) (%%floor x))
+   ((%%negative? x) (%%ceiling x))
    (else x)))
 
 ;;; note that it is not clear if JS's Math.round is guaranteed
 ;;; to round even on midpoints.
 (define (round x)
-  (let ((diff (- x (floor x))))
+  (let ((diff (%%- x (floor x))))
     (cond
-     ((< diff 0.5) (floor x))
-     ((> diff 0.5) (ceiling x))
-     ((even? (floor x)) (floor x))
-     (else (ceiling x)))))
+     ((%%< diff 0.5) (%%floor x))
+     ((%%> diff 0.5) (%%ceiling x))
+     ((%%even? (%%floor x)) (%%floor x))
+     (else (%%ceiling x)))))
 
 ;;; Thanks to Alan Bawden.  This is snarfed from the MIT/GNU Scheme source.
 (define (rationalize x e)
   (define (loop x y)
-    (let ((fx (floor x))
-	  (fy (floor y)))
-      (cond ((not (< fx x)) fx)
-	    ((= fx fy)
-	     (+ fx
-		(/ 1
-		   (loop (/ 1 (- y fy))
-			 (/ 1 (- x fx))))))
-	    (else (+ fx 1)))))
+    (let ((fx (%%floor x))
+	  (fy (%%floor y)))
+      (cond ((not (%%< fx x)) fx)
+	    ((%%= fx fy)
+	     (%%+ fx
+		(%%/ 1
+		   (loop (%%/ 1 (%%- y fy))
+			 (%%/ 1 (%%- x fx))))))
+	    (else (%%+ fx 1)))))
 
   (define (find-it x y)
-    (cond ((positive? x) (loop x y))
-	  ((negative? y) (- (loop (- y) (- x))))
+    (cond ((%%positive? x) (loop x y))
+	  ((%%negative? y) (%%- 0 (loop (%%- 0 y) (%%- 0 x))))
 	  (else 0)))
+  (%%check-number x)
+  (%%check-number e)
   (cond
-   ((positive? e) (find-it (- x e) (+ x e)))
-   ((negative? e) (find-it (+ x e) (- x e)))
+   ((%%positive? e) (find-it (%%- x e) (%%+ x e)))
+   ((%%negative? e) (find-it (%%+ x e) (%%- x e)))
    (else x)))
 
 (unary-math-op exp "Math.exp(~a)")
@@ -387,7 +417,7 @@
   (if (null? y*)
       (foreign-inline "Math.tan(~a)" (%%check-number x))
       (foreign-inline "Math.tan2(~a,~a)" 
-		      (%%check-number x) (%%check-number (car y*)))))
+		      (%%check-number x) (%%check-number (%%car y*)))))
 
 (unary-math-op sqrt "Math.sqrt(~a)")
 
@@ -397,7 +427,7 @@
 (define (exact->inexact z) z)
 (define (inexact->exact z) z)
 
-(unary-math-op number->string "new SchemeString(String(~a))")
+(unary-math-op %%number->string number->string "new SchemeString(String(~a))")
 (define string->number 'xxx)
 
 
@@ -418,10 +448,10 @@
 (define (cons a d)
   (foreign-inline "new Pair(~a,~a)" a d))
 
-(define (car p)
-  (foreign-inline "~a.car" (%%check-pair p)))
-(define (cdr p)
-  (foreign-inline "~a.cdr" (%%check-pair p)))
+(define (%%car p) (foreign-inline "~a.car" p))
+(define (%%cdr p) (foreign-inline "~a.cdr" p))
+(define (car p) (%%car (%%check-pair p)))
+(define (cdr p) (%%cdr (%%check-pair p)))
 
 (define (set-car! p obj)
   (foreign-inline "~a.car=~a" (%%check-pair p) obj)
@@ -434,6 +464,10 @@
 (define (cadr obj) (car (cdr obj)))
 (define (cdar obj) (cdr (car obj)))
 (define (cddr obj) (cdr (cdr obj)))
+
+(define (%%caar obj) (%%car (%%car obj)))
+(define (%%cdar obj) (%%cdr (%%car obj)))
+(define (%%cddr obj) (%%cdr (%%cdr obj)))
 
 (define (caaar obj) (car (caar obj)))
 (define (caadr obj) (car (cadr obj)))
@@ -467,21 +501,27 @@
 (define (list? obj)
   (or (null? obj)
       (and (pair? obj)
-	   (list? (cdr obj)))))
+	   (list? (%%cdr obj)))))
 
 (define (list . objs) objs)
 
 (define (length list)
   (if (null? list)
       0
-      (+ 1 (length (cdr list)))))
+      (%%+ 1 (length (cdr list)))))
+(define (%%length list)
+  (if (null? list)
+      0
+      (%%+ 1 (%%length (%%cdr list)))))
+
 
 (define (append . lists)
   (let append* ((lists lists))
     (cond
      ((null? lists) '())
-     ((null? (car lists)) (append* (cdr lists)))
-     (else (cons (caar lists) (append* (cons (cdar lists) (cdr lists))))))))
+     ((null? (%%car lists)) (append* (%%cdr lists)))
+     (else (cons (%%caar lists) (append* (cons (%%cdar lists) 
+					       (%%cdr lists))))))))
 
 (define (reverse list)
   (let next ((list list) 
@@ -489,61 +529,69 @@
     (if (null? list)
 	so-far
 	(next (cdr list) (cons (car list) so-far)))))
+(define (%%reverse list)
+  (let next ((list list) 
+	     (so-far '()))
+    (if (null? list)
+	so-far
+	(next (%%cdr list) (cons (%%car list) so-far)))))
 
 (define list-tail
   (let ()
     (define (list-tail list k)
       (if (zero? k)
 	  list
-	  (list-tail (cdr list) (- k 1))))
+	  (list-tail (cdr list) (%%- k 1))))
     list-tail))
 
 (define (list-ref list k)
   (if (zero? k)
       (car list)
-      (list-ref (cdr list) (- k 1))))
+      (list-ref (cdr list) (%%- k 1))))
 
 (define (memq obj list)
   (and (pair? list)
-       (if (eq? obj (car list))
+       (if (eq? obj (%%car list))
 	   list
-	   (memq obj (cdr list)))))
+	   (memq obj (%%cdr list)))))
 
 (define (memv obj list)
   (and (pair? list)
-       (if (eqv? obj (car list))
+       (if (eqv? obj (%%car list))
 	   list
-	   (memv obj (cdr list)))))
+	   (memv obj (%%cdr list)))))
 
 (define (member obj list)
   (and (pair? list)
-       (if (equal? obj (car list))
+       (if (equal? obj (%%car list))
 	   list
-	   (member obj (cdr list)))))
+	   (member obj (%%cdr list)))))
 
 (define (assq obj alist)
   (and (pair? alist)
-       (if (eq? obj (caar alist))
-	   (car alist)
-	   (assq obj (cdr alist)))))
+       (if (eq? obj (car (%%car alist)))
+	   (%%car alist)
+	   (assq obj (%%cdr alist)))))
 
 (define (assv obj alist)
   (and (pair? alist)
-       (if (eqv? obj (caar alist))
-	   (car alist)
-	   (assv obj (cdr alist)))))
+       (if (eqv? obj (car (%%car alist)))
+	   (%%car alist)
+	   (assv obj (%%cdr alist)))))
 
 (define (assoc obj alist)
   (and (pair? alist)
-       (if (equal? obj (caar alist))
-	   (car alist)
-	   (assoc obj (cdr alist)))))
+       (if (equal? obj (car (%%car alist)))
+	   (%%car alist)
+	   (assoc obj (%%cdr alist)))))
 
 (define (symbol? obj)
   (foreign-inline "typeof(~a)==='string'" obj))
 
+(define (%%symbol->string sym)
+  (foreign-inline "new SchemeString(~a)" sym))
 (define (symbol->string sym)
-  (foreign-inline "new SchemeString(~a)" (%%check-symbol sym)))
+  (%%symbol->string (%%check-symbol sym)))
 
 (define (string->symbol sym)
   (foreign-inline "~a.val" (%%check-string sym)))
@@ -553,66 +601,87 @@
 
 (define-syntax char-comp
   (syntax-rules ()
-    ((_ scheme-name js-expr)
-     (define (scheme-name c1 c2)
-       (foreign-inline js-expr (%%check-char c1) (%%check-char c2))))))
+    ((_ unchecked-scheme-name scheme-name js-expr)
+     (begin
+       (define (unchecked-scheme-name c1 c2)
+	 (foreign-inline js-expr c1 c2))
+       (define (scheme-name c1 c2)
+	 (unchecked-scheme-name (%%check-char c1) (%%check-char c2)))))))
 
-(char-comp char=? "~a.val===~a.val")
-(char-comp char<? "~a.val<~a.val")
-(char-comp char>? "~a.val>~a.val")
-(char-comp char<=? "~a.val<=~a.val")
-(char-comp char>=? "~a.val>=~a.val")
+(char-comp %%char=? char=? "~a.val===~a.val")
+(char-comp %%char<? char<? "~a.val<~a.val")
+(char-comp %%char>? char>? "~a.val>~a.val")
+(char-comp %%char<=? char<=? "~a.val<=~a.val")
+(char-comp %%char>=? char>=? "~a.val>=~a.val")
 
 (define-syntax ci-char-comp
   (syntax-rules ()
     ((_ ci-scheme-name simple-scheme-name)
      (define (ci-scheme-name c1 c2)
        (simple-scheme-name (char-upcase c1) (char-upcase c2))))))
+(define-syntax %%ci-char-comp
+  (syntax-rules ()
+    ((_ ci-scheme-name simple-scheme-name)
+     (define (ci-scheme-name c1 c2)
+       (simple-scheme-name (%%char-upcase c1) (%%char-upcase c2))))))
 
-(ci-char-comp char-ci=? char=?)
-(ci-char-comp char-ci<? char<?)
-(ci-char-comp char-ci>? char>?)
-(ci-char-comp char-ci<=? char<=?)
-(ci-char-comp char-ci>=? char>=?)
+(ci-char-comp char-ci=? %%char=?)
+(ci-char-comp char-ci<? %%char<?)
+(ci-char-comp char-ci>? %%char>?)
+(ci-char-comp char-ci<=? %%char<=?)
+(ci-char-comp char-ci>=? %%char>=?)
+(%%ci-char-comp %%char-ci=? %%char=?)
+(%%ci-char-comp %%char-ci<? %%char<?)
+(%%ci-char-comp %%char-ci>? %%char>?)
+(%%ci-char-comp %%char-ci<=? %%char<=?)
+(%%ci-char-comp %%char-ci>=? %%char>=?)
 
 (define (char-alphabetic? c)
   (or (char-upper-case? c)
-      (char-lower-case? c)))
+      (%%char-lower-case? c)))
 
 (define (char-numeric? c)
   (let ((n (char->integer c)))
-    (and (>= n 48) (<= n 57))))
+    (and (%%>= n 48) (%%<= n 57))))
 
 (define (char-whitespace? c)
   (let ((n (char->integer c)))
-    (or (= n 32)			;space
-	(= n 9)				;tab
-	(= n 10)			;linefeed
-	(= n 12)			;formfeed
-	(= n 13))))			;carriage return
+    (or (%%= n 32)			;space
+	(%%= n 9)			;tab
+	(%%= n 10)			;linefeed
+	(%%= n 12)			;formfeed
+	(%%= n 13))))			;carriage return
 
 (define (char-upper-case? c)
   (let ((n (char->integer c)))
-    (and (>= n 65) (<= n 90))))
+    (and (%%>= n 65) (%%<= n 90))))
 
+(define (%%char-lower-case? c)
+  (let ((n (%%char->integer c)))
+    (and (%%>= n 97) (%%<= n 122))))
 (define (char-lower-case? c)
-  (let ((n (char->integer c)))
-    (and (>= n 97) (<= n 122))))
+  (%%char-lower-case? (%%check-char c)))
   
+(define (%%char->integer c)
+  (foreign-inline "~a.val.charCodeAt(0)" c))
 (define (char->integer c)
-  (foreign-inline "~a.val.charCodeAt(0)" (%%check-char c)))
+  (%%char->integer (%%check-char c)))
 
+(define (%%integer->char n)
+  (foreign-inline "intern_char(String.fromCharCode(~a))" n))
 (define (integer->char n)
-  (foreign-inline "intern_char(String.fromCharCode(~a))" (%%check-integer n)))
+  (%%integer->char (%%check-integer n)))
 
-(define (char-upcase c)
-  (if (char-lower-case? c)
-      (integer->char (- (char->integer c) 32))
+(define (%%char-upcase c)
+  (if (%%char-lower-case? c)
+      (%%integer->char (%%- (%%char->integer c) 32))
       c))
+(define (char-upcase c)
+  (%%char-upcase (%%check-char c)))
 
 (define (char-downcase c)
   (if (char-upper-case? c)
-      (integer->char (+ (char->integer c) 32))
+      (%%integer->char (%%+ (%%char->integer c) 32))
       c))
 
 (define (string? obj)
@@ -621,11 +690,13 @@
 ;;; MAKE-STRING in runtime
 ;;; STRING in runtime
 
-(define (string-length s)
-  (foreign-inline "~a.val.length" (%%check-string s)))
+(define (%%string-length s) (foreign-inline "~a.val.length" s))
+(define (string-length s) (%%string-length (%%check-string s)))
 
+(define (%%string-ref s k)
+  (foreign-inline "intern_char(~a.val.charAt(~a))" s k))
 (define (string-ref s k)
-  (foreign-inline "intern_char(~a.val.charAt(~a))" s (%%check-string-len s k)))
+  (%%string-ref s (%%check-string-len s k)))
 
 (define (string-set! s k c)
   (foreign-inline "~a.val=~a.val.slice(0,~a)+~a.val+~a.val.slice(~a+1)"
@@ -634,20 +705,22 @@
 
 (define-syntax string-comp
   (syntax-rules ()
-    ((_ scheme-name js-expr)
+    ((_ unchecked-scheme-name scheme-name js-expr)
+     (define (unchecked-scheme-name s1 s2)
+       (foreign-inline js-expr s1 s2))
      (define (scheme-name s1 s2)
-       (foreign-inline js-expr (%%check-string s1) (%%check-string s2))))))
+       (unchecked-scheme-name (%%check-string s1) (%%check-string s2))))))
 
-(string-comp string=? "~a.val===~a.val")
+(string-comp %%string=? string=? "~a.val===~a.val")
 
 (define (string-ci=? s1 s2)
-  (let ((len (string-length s)))
-    (and (= len (string-length s2))
+  (let ((len (string-length s1)))
+    (and (%%= len (string-length s2))
 	 (let next ((i 0))
-	   (or (= i len)
-	       (and (char-ci=? (string-ref s1 i)
-			       (string-ref s2 i))
-		    (next (+ i 1))))))))
+	   (or (%%= i len)
+	       (and (%%char-ci=? (%%string-ref s1 i)
+				 (%%string-ref s2 i))
+		    (next (%%+ i 1))))))))
 
 (string-comp string<? "~a.val<~a.val")
 (string-comp string>? "~a.val>~a.val")
@@ -660,15 +733,15 @@
      (define (name s1 s2)
        (let ((len1 (string-length s1))
 	     (len2 (string-length s2)))
-	 (let ((minlen (min len1 len2)))
+	 (let ((minlen (%%min len1 len2)))
 	   (let next ((i 0))
-	     (if (= i minlen)
-		 (lentest? len1 len2)
-		 (or (chartest? (string-ref s1 i)
-				(string-ref s2 i))
-		     (and (char-ci=? (string-ref s1 i)
-				     (string-ref s2 i))
-			  (next (+ i 1))))))))))))
+	     (if (%%= i minlen)
+		 (%%lentest? len1 len2)
+		 (or (%%chartest? (%%string-ref s1 i)
+				  (%%string-ref s2 i))
+		     (and (%%char-ci=? (%%string-ref s1 i)
+				       (%%string-ref s2 i))
+			  (next (%%+ i 1))))))))))))
 
 (string-compare-ci string-ci<? < char-ci<?)
 (string-compare-ci string-ci>? > char-ci>?)
@@ -676,8 +749,8 @@
 (string-compare-ci string-ci>=? >= char-ci>=?)
 
 (define (substring s start end)
-  (foreign-inline "new SchemeString(~a.val.substring(~a,~a))"
-		  s (%%check-integer start) (%%check-string-len s (- end 1))))
+  (%%check-substring s start end)
+  (foreign-inline "new SchemeString(~a.val.substring(~a,~a))" s start end))
 
 ;;; STRING-APPEND in runtime
 
@@ -685,14 +758,14 @@
   (let ((len (string-length s)))
     (let next-char ((i len)
 		    (lis '()))
-      (if (= len 0)
+      (if (%%= i 0)
 	  lis
-	  (next-char (- i 1) (cons (string-ref s (- i 1)) lis))))))
+	  (next-char (%%- i 1) (cons (%%string-ref s (%%- i 1)) lis))))))
 
 ;;; LIST->STRING in runtime
 
 (define (string-copy s)
-  (substring s 0 (string-length s)))
+  (foreign-inline "new SchemeString(~a.val)" (%%check-string s)))
 
 ;;; STRING-FILL! in runtime
 
@@ -702,30 +775,32 @@
 ;;; MAKE-VECTOR in runtime
 ;;; VECTOR in runtime
 
-(define (vector-length v)
-  (foreign-inline "~a.length" (%%check-vector v)))
+(define (%%vector-length v) (foreign-inline "~a.length" v))
+(define (vector-length v) (%%vector-length (%%check-vector v)))
 
-(define (vector-ref v k)
-  (foreign-inline "~a[~a]" v (%%check-vector-len v k)))
+(define (%%vector-ref v k) (foreign-inline "~a[~a]" v k))
+(define (vector-ref v k) (%%vector-ref v (%%check-vector-len v k)))
 
-(define (vector-set! v k obj)
-  (foreign-inline "~a[~a]=~a" v (%%check-vector-len v k) obj))
+(define (%%vector-set! v k obj) (foreign-inline "~a[~a]=~a" v k obj))
+(define (vector-set! v k obj) (%%vector-set k (%%check-vector-len v k) obj))
 
-(define (vector->list v)
-  (let ((len (vector-length v)))
+(define (%%vector->list v)
+  (let ((len (%%vector-length v)))
     (let next-elt ((i len)
 		   (lis '()))
-      (if (= len 0)
+      (if (%%= i 0)
 	  lis
-	  (next-elt (- i 1) (cons (vector-ref v (- i 1)) lis))))))
+	  (next-elt (%%- i 1) (cons (%%vector-ref v (%%- i 1)) lis))))))
+(define (vector->list v)
+  (%%vector->list (%%check-vector v)))
 
 ;; LIST->VECTOR in runtime
 
 (define (vector-fill! v elt)
   (let ((len (vector-length v)))
-    (do ((i 0 (+ i 1)))
-	((= i len))
-      (vector-set! v i c))))
+    (do ((i 0 (%%+ i 1)))
+	((%%= i len))
+      (%%vector-set! v i c))))
 
 ;;;
 ;;; PROCEDURES (control features)
@@ -735,32 +810,39 @@
 
 ;;; APPLY in runtime
 
+(define (%%map proc list)
+  (let (map1 ((inlist list)
+	      (outlist '())))
+    (if (null? inlist)
+	(%%reverse outlist)
+	(map1 (%%cdr inlist) (cons (proc (%%car inlist)) outlist)))))
+
 (define (map proc list . lists)
   (if (null? lists)
       (let map1 ((inlist list)
 		 (outlist '()))
 	(if (null? inlist)
-	    (reverse outlist)
+	    (%%reverse outlist)
 	    (map1 (cdr inlist) (cons (proc (car inlist)) outlist))))
       (let map1 ((inlists (cons list lists))
 		 (outlist '()))
-	(if (null? (car inlists))
-	    (reverse outlist)
-	    (map1 (map cdr inlists)
-		  (cons (apply proc (map car inlists)) outlist))))))
+	(if (null? (%%car inlists))
+	    (%%reverse outlist)
+	    (map1 (%%map cdr inlists)
+		  (cons (%%apply proc (%%map car inlists)) outlist))))))
 
 (define (for-each proc . lists)
-  (if (not (null? (car lists)))
+  (if (not (null? (%%car lists)))
       (begin
-	(apply proc (map car lists))
-	(for-each proc (map cdr lists)))))
+	(%%apply proc (%%map car lists))
+	(for-each proc (%%map cdr lists)))))
 
 (define (force promise)
   (if (car promise)
-      (cdr promise)
-      (let ((val ((cdr promise))))
-	(if (car promise)
-	    (cdr promise)
+      (%%cdr promise)
+      (let ((val ((%%cdr promise))))
+	(if (%%car promise)
+	    (%%cdr promise)
 	    (begin (set-car! promise #t)
 		   (set-cdr! promise val)
 		   val)))))
@@ -768,8 +850,8 @@
 ;;; CALL-WITH-CURRENT-CONTINUATION in runtime
 
 (define (values . vals)
-  (if (= (length vals) 1)
-      (car vals)
+  (if (%%= (%%length vals) 1)
+      (%%car vals)
       (foreign-inline "new MultipleValues(~a)" vals)))
 
 (define (call-with-values producer consumer)
@@ -796,12 +878,12 @@
 (define (call-with-input-file str proc)
   (let ((p (open-input-file str)))
     (proc p)
-    (close-input-port p)))
+    (%%close-input-port p)))
 
 (define (call-with-output-file str proc)
   (let ((p (open-output-file str)))
     (proc p)
-    (close-output-port p)))
+    (%%close-output-port p)))
 
 (define (port? p)
   (or (input-port? p)
@@ -809,15 +891,15 @@
 
 (define (with-input-from-file str proc)
   (call-with-input-file str (lambda (p)
-			      (let ((old (current-input-port p)))
+			      (let ((old (%%current-input-port p)))
 				(proc)
-				(current-input-port old)))))
+				(%%current-input-port old)))))
 
 (define (with-output-to-file str proc)
   (call-with-output-file str (lambda (p)
-			       (let ((old (current-output-port p)))
+			       (let ((old (%%current-output-port p)))
 				 (proc)
-				 (current-output-port old)))))
+				 (%%current-output-port old)))))
 
 ;;; Requires NULL? CURRENT-INPUT-PORT CAR PEEK-CHAR MEMV STRING-APPEND
 ;;; STRING CHAR-DOWNCASE READ-CHAR LIST ERROR EQV? LIST->VECTOR 
@@ -951,87 +1033,98 @@
     (read*)))
 
 (define (write obj . port*)
-  (let ((port (if (null? port*) (current-output-port) (car port*))))
-    (define (write-slashify str)
-      (write-char #\" port)
-      (let ((len (string-length str)))
-	(do ((i 0 (+ i 1)))
-	    ((>= i len))
-	  (if (or (char=? (string-ref str i) #\")
-		  (char=? (string-ref str i) #\\))
-	      (write-char #\\ port))
-	  (write-char (string-ref str i) port)))
-      (write-char #\" port))
+  (%%write obj (if (null? port*) 
+		   (current-output-port) 
+		   (%%check-output-port (%%car port*)))))
 
-    (define (write-rest tail)
-      (cond
-       ((null? tail) (write-char #\) port))
-       ((pair? tail)
-	(write-char #\space port)
-	(write (car tail) port)
-	(write-rest (cdr tail)))
-       (else (display " . " port)
-	     (write tail port)
-	     (write-char #\) port))))
+(define (%%write obj port)
+  (define (write-slashify str)
+    (%%write-char #\" port)
+    (let ((len (%%string-length str)))
+      (do ((i 0 (%%+ i 1)))
+	  ((%%>= i len))
+	(if (or (%%char=? (%%string-ref str i) #\")
+		(%%char=? (%%string-ref str i) #\\))
+	    (%%write-char #\\ port))
+	(%%write-char (%%string-ref str i) port)))
+    (%%write-char #\" port))
 
+  (define (write-rest tail)
     (cond
-     ((eq? obj #t) (display "#t" port))
-     ((eq? obj #f) (display "#f" port))
-     ((symbol? obj) (display (symbol->string obj) port))
-     ((char? obj) (display (case obj
+     ((null? tail) (%%write-char #\) port))
+     ((pair? tail)
+      (%%write-char #\space port)
+      (%%write (%%car tail) port)
+      (write-rest (%%cdr tail)))
+     (else (%%display " . " port)
+	   (%%write tail port)
+	   (%%write-char #\) port))))
+
+  (cond
+   ((eq? obj #t) (%%display "#t" port))
+   ((eq? obj #f) (%%display "#f" port))
+   ((symbol? obj) (%%display (%%symbol->string obj) port))
+   ((char? obj) (%%display (case obj
 			     ((#\newline) "#\\newline")
 			     ((#\return) "#\\return")
 			     ((#\page) "#\\page")
 			     ((#\tab) "#\\tab")
 			     ((#\space) "#\\space")
-			     (else (string #\# #\\ obj))) port))
-     ((vector? obj) (write-char #\# port) (write (vector->list obj) port))
-     ((pair? obj) 
-      (write-char #\( port)
-      (write (car obj) port) 
-      (write-rest (cdr obj)))
-     ((null? obj) (display "()" port))
-     ((number? obj) (display (number->string obj) port))
-     ((string? obj) (write-slashify obj))
-     ((procedure? obj) (display "#<procedure>" port))
-     ((eof-object? obj) (display "#<eof>" port))
-     ((port? obj) (display "#<port>" port)))))
+			     (else (%%string #\# #\\ obj))) 
+			   port))
+   ((vector? obj) (%%write-char #\# port) (%%write (%%vector->list obj) port))
+   ((pair? obj) 
+    (%%write-char #\( port)
+    (%%write (%%car obj) port) 
+    (write-rest (%%cdr obj)))
+   ((null? obj) (%%display "()" port))
+   ((number? obj) (%%display (%%number->string obj) port))
+   ((string? obj) (write-slashify obj))
+   ((procedure? obj) (%%display "#<procedure>" port))
+   ((eof-object? obj) (%%display "#<eof>" port))
+   ((port? obj) (%%display "#<port>" port))))
 
 (define (display obj . port*)
-  (let ((port (if (null? port*) (current-output-port) (car port*))))
-    (define (display-rest tail)
-      (cond
-       ((null? tail) (write-char #\) port))
-       ((pair? tail)
-	(write-char #\space port)
-	(display (car tail) port)
-	(display-rest (cdr tail)))
-       (else (display " . " port)
-	     (display tail port)
-	     (write-char #\) port))))
+  (%%display obj (if (null? port*) 
+		     (current-output-port) 
+		     (%%check-output-port (%%car port*)))))
 
+(define (%%display obj port)
+  (define (display-rest tail)
     (cond
-     ((eq? obj #t) (display "#t" port))
-     ((eq? obj #f) (display "#f" port))
-     ((symbol? obj) (display (symbol->string obj) port))
-     ((char? obj) (write-char obj port))
-     ((vector? obj) (write-char #\# port) (display (vector->list obj) port))
-     ((pair? obj) (write-char #\( port)
-      (display (car obj) port) 
-      (display-rest (cdr obj)))
-     ((null? obj) (display "()" port))
-     ((number? obj) (display (number->string obj) port))
-     ((string? obj) (let ((len (string-length obj)))
-		      (do ((i 0 (+ i 1)))
-			  ((>= i len))
-			(write-char (string-ref obj i) port))))
-     ((procedure? obj) (display "#<procedure>" port))
-     ((eof-object? obj) (display "#<eof>" port))
-     ((port? obj) (display "#<port>" port)))))
+     ((null? tail) (%%write-char #\) port))
+     ((pair? tail)
+      (%%write-char #\space port)
+      (%%display (%%car tail) port)
+      (display-rest (%%cdr tail)))
+     (else (%%display " . " port)
+	   (%%display tail port)
+	   (%%write-char #\) port))))
+
+  (cond
+   ((eq? obj #t) (%%display "#t" port))
+   ((eq? obj #f) (%%display "#f" port))
+   ((symbol? obj) (%%display (%%symbol->string obj) port))
+   ((char? obj) (%%write-char obj port))
+   ((vector? obj) (%%write-char #\# port) (%%display (%%vector->list obj)
+						     port))
+   ((pair? obj) (%%write-char #\( port)
+    (%%display (%%car obj) port) 
+    (display-rest (%%cdr obj)))
+   ((null? obj) (%%display "()" port))
+   ((number? obj) (%%display (%%number->string obj) port))
+   ((string? obj) (let ((len (%%string-length obj)))
+		    (do ((i 0 (%%+ i 1)))
+			((%%>= i len))
+		      (%%write-char (%%string-ref obj i) port))))
+   ((procedure? obj) (%%display "#<procedure>" port))
+   ((eof-object? obj) (%%display "#<eof>" port))
+   ((port? obj) (%%display "#<port>" port))))
     
 (define (newline . port*)
-  (write-char #\newline 
-	      (if (null? port*) (current-output-port) (car port*))))
+  (%%write-char #\newline 
+		(if (null? port*) (current-output-port) 
+		    (%%check-output-port (%%car port*)))))
 
 ;;; SYSTEM INTERFACE
 ;;;
@@ -1043,10 +1136,10 @@
   (foreign-inline "(function (){throw{name:~a,obj:~a,message:~a};})()"
 		  name obj (string->symbol message)))
 (define (type-error obj type-name)
-  (js-throw 'SINJStypeerror obj (string-append "not a " type-name)))
+  (js-throw 'SINJStypeerror obj (%%string-append "not a " type-name)))
 (define (length-error k name)
   (js-throw 'SINJSlengtherror k
-	    (string-append "out of bounds for access to " name)))
+	    (%%string-append "out of bounds for access to " name)))
 (define-syntax type-checker
   (syntax-rules ()
     ((_ scheme-name predicate? name)
@@ -1062,14 +1155,23 @@
 (type-checker %%check-string string? "string")
 (type-checker %%check-char char? "character")
 (type-checker %%check-vector vector? "vector")
+(type-checker %%check-output-port output-port? "output port")
 
 (define-syntax length-checker
   (syntax-rules ()
     ((_ scheme-name len-proc name)
      (define (scheme-name obj k)
        (if (and (>= k 0) 
-		(< k (len-proc obj)))
+		(%%< k (len-proc obj)))
 	   k
 	   (length-error k name))))))
 (length-checker %%check-string-len string-length "string")
 (length-checker %%check-vector-len vector-length "vector")
+
+(define (%%check-substring s start end)
+  (if (< start 0)
+      (length-error start "string"))
+  (if (> start end)
+      (length-error start "string"))
+  (if (%%> end (string-length s))
+      (length-error end "string")))
