@@ -13,64 +13,65 @@
 ;;; for inclusion into the source.  The second is observed by carefully
 ;;; removing items from integrables when looping.
 (define (perform-integrations form integrables)
-  (cond
-   ((symbol? form) form)
-   ((pair? form)
-    (case (car form)
-      ((quote top-level-ref) form)
+  (let ((big (> (complexity form) 50)))
+    (let integrate ((form form)
+		    (integrables integrables))
+      (cond
+       ((symbol? form) form)
+       ((pair? form)
+	(case (car form)
+	  ((quote top-level-ref) form)
 
-      ((foreign-inline)
-       (let ((code (cadr form))
-	     (args (cddr form)))
-	 `(foreign-inline ,code
-			  ,@(map (cut perform-integrations <> integrables) 
-				 args))))
-      
-      ((set!)
-       (let ((var (cadr form))
-	     (val (caddr form)))
-	 `(set! ,var ,(perform-integrations val integrables))))
+	  ((foreign-inline)
+	   (let ((code (cadr form))
+		 (args (cddr form)))
+	     `(foreign-inline ,code
+			      ,@(map (cut integrate <> integrables) args))))
+	  
+	  ((set!)
+	   (let ((var (cadr form))
+		 (val (caddr form)))
+	     `(set! ,var ,(integrate val integrables))))
 
       ;;; don't allow integration inside the variable's own
       ;;; definition
-      ((top-level-set!)
-       (let ((var (cadr form))
-	     (val (caddr form)))
-	 `(top-level-set! 
-	   ,var
-	   ,(perform-integrations val (drop-integrable var integrables)))))
+	  ((top-level-set!)
+	   (let ((var (cadr form))
+		 (val (caddr form)))
+	     `(top-level-set!
+	       ,var ,(integrate val (drop-integrable var integrables)))))
 
-      ((if) 
-       `(if ,@(map (cut perform-integrations <> integrables) (cdr form))))
+	  ((if) 
+	   `(if ,@(map (cut integrate <> integrables) (cdr form))))
 
-      ((begin)
-       `(begin ,@(map (cut perform-integrations <> integrables) (cdr form))))
+	  ((begin)
+	   `(begin ,@(map (cut integrate <> integrables) (cdr form))))
 
-      ((lambda) 
-       (let ((formals (cadr form))
-	     (forms (cddr form)))
-	 `(lambda ,formals ,@(map (cut perform-integrations <> integrables)
-				  forms))))
+	  ((lambda) 
+	   (let ((formals (cadr form))
+		 (forms (cddr form)))
+	     `(lambda ,formals ,@(map (cut integrate <> integrables) forms))))
 
-      (else
-       (let ((proc (car form))
-	     (args (cdr form)))
-	 (if (and (list? proc)
-		  (eq? (car proc) 'top-level-ref))
-	     (let ((integration (assq (cadr proc) integrables)))
-	       (if integration
-		   (let ((pruned-integrables (drop-integrable (car integration)
-							      integrables)))
-		     ;; don't allow integration of this name again inside
-		     ;; the integration itself, to avoid infinite loops.
-		     `(,(perform-integrations (rename-integration 
-					       (cdr integration))
-					      pruned-integrables)
-		       ,@(map (cut perform-integrations <> integrables) args)))
-		   (map (cut perform-integrations <> integrables) form)))
-	     (map (cut perform-integrations <> integrables) form))))))
+	  (else
+	   (let ((proc (car form))
+		 (args (cdr form)))
+	     (if (and (list? proc)
+		      (eq? (car proc) 'top-level-ref))
+		 (let ((integration (assq (cadr proc) integrables)))
+		   (if (and integration
+			    (or (not big)
+				(not (> (complexity (cdr integration)) 50))))
+		       (let ((pruned-integrables 
+			      (drop-integrable (car integration) integrables)))
+			 ;; don't allow integration of this name again inside
+			 ;; the integration itself, to avoid infinite loops.
+			 `(,(integrate (rename-integration (cdr integration))
+				       pruned-integrables)
+			   ,@(map (cut integrate <> integrables) args)))
+		       (map (cut integrate <> integrables) form)))
+		 (map (cut integrate <> integrables) form))))))
 
-   (else (error perform-integrations "bad form"))))
+       (else (error integrate "bad form"))))))
 
 ;;; prune NAME from integrables
 (define (drop-integrable name integrables)
