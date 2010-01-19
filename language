@@ -1,10 +1,5 @@
 Extensions to the Scheme language for sinjs.
 
-(number->jsnum NUMBER)
-  Returns a JavaScript number for the Scheme NUMBER.  It is an error if
-  NUMBER is not real.  If NUMBER is too big to fit in a JavaScript number,
-  an appropriate NaN might be returned.
-
 (foreign-inline CODE ARG ...)
   CODE is a format string using exactly as many ~a elements as there are
   ARGs.  When the args are substituted into the CODE, the result should be
@@ -20,6 +15,13 @@ Extensions to the Scheme language for sinjs.
   (define (sin x)
     (foreign-inline "Math.sin(~a)" (number->jsnum x)))
 
+(foreign-prologue CODE)
+  CODE is added to the prologue for the current library or main program,
+  and will be executed by the JavaScript system before any Scheme code
+  (from this or any other library) is executed.
+
+===not yet===
+
 (foreign-lambda (ARG ...) CODE)
   Returns a procedure whose source code is in Javascript.  The ARG ... 
   parameters must be a list of identifiers in legitimate JavaScript
@@ -30,7 +32,7 @@ Extensions to the Scheme language for sinjs.
   ((foreign-lambda (x y) "var a = x+y; if (x > 0) return a; else return 0;")
    3 5)
     => 8
-  
+
 (foreign-lambda-cps (CONT ARG ...) CODE)
   Just like foreign-lambda, but the procedure is called in primitive
   continuation-passing style.  The parameter CONT must be called with
@@ -56,4 +58,9 @@ procedure must not return more than once or an error will be raised:
 implicit JavaScript continuations cannot be invoked more than once, so
 if PROC saves its continuation and executes it a second time, there will be
 no way to invoke callScheme's continuation a second time.
+
+(number->jsnum NUMBER)
+  Returns a JavaScript number for the Scheme NUMBER.  It is an error if
+  NUMBER is not real.  If NUMBER is too big to fit in a JavaScript number,
+  an appropriate NaN might be returned.
 
