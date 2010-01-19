@@ -1,0 +1,174 @@
+We need a way to support separate compilation and libraries.
+
+A compiled library consists of the following elements:
+
+  a name
+  syntax forms exported
+  a list of top-level executions
+  a list of exported names
+
+top level references are compiled as
+(top-level-ref lib var)
+(top-level-set! lib var val)
+where LIB is a symbol along with NAME.
+
+This becomes:
+sinjs_top_level_binding[lib][var]
+
+When a library has a dependency on another library, this has the
+following effects.  First, exported syntax forms are added to the
+compilation environment.  Second, exported names are made available
+for top level references.
+
+We have the same restrictive mutation rule as r6rs: bindings exported
+whether implicitly or explicitly may never be modified, whether in the
+library itself, in code which imports, or by a macro specified in the
+library but executed outside the library.
+
+However, we have a special import rule, which allows importing a copy
+of an exported variable into a new (private) binding instead of a
+public binding.  Because such variables are private, they may be
+modified.  This allows r5rs to be implemented.
+
+Importation of variables imports the binding (except in the case of copying
+imports, which only import the global value).  Importation of syntax
+definitions makes the definition available in the importing library.
+
+The following syntax, reminiscent of r6rs and err5rs, is used.
+
+(library name
+	 (export <export-spec> ...)
+	 (import <import-spec> ...)
+  form ...)
+
+An export spec is:
+  <identifier>
+  (<private-name> <public-name>)
+
+An import spec is:
+  <library-name> 
+  (only <import-spec> <identifier> ...)
+  (except <import-spec> <identifier> ...)
+  (prefix <import-spec> <prefix>)
+  (rename <import-spec> (<public-name> <private-name>) ...)
+  (copy <import-spec>)
+  (primitive-syntax <name> ...)
+
+<library-name> selects all the identifiers exported by the specified library.
+
+(only <import-spec> <identifier> ...) selects the named identifiers exported
+from the <import-spec>.  It is an error if any of them are not present in
+<import-spec>.
+
+(except <import-spec> <identifier> ...) selects all the identifiers in
+<import-spec> except for those named.  It is an error if any of them
+are not present in <import-spec>.
+
+(prefix <import-spec> <prefix>) consists of all the bindings in <import-spec> 
+with each name prefixd with <prefix>.
+
+(rename <import-spec> (<public-name> <private-name>) ...) refers to all
+the bindings in <import-spec>.  Any mentioned as a <public-name> are renamed
+<private-name>.  It is an error if any <public-name> is not found in
+<import-spec>, and if any <private-name> overlaps with the names in
+<import-spec> once the <public-name>s have been removed.
+
+(copy <import-spec>) creates new private bindings with the names in
+<import-spec>, assigned to the values of the exported bindings in
+<import-spec>.
+
+(primitive-syntax <name> ...) make visible the builtin compiler syntax
+<name>.  It is an error if any <name> is not recognized by the compiler
+as builtin syntax.
+
+=====
+
+Compilation units:
+
+A source file contains any number of library specifications and other
+top-level forms, and generates compiler output consisting of a series
+of COMPILED-LIBRARY and COMPILED-MAIN-PROGRAM forms.  Each library in
+the source produces a single COMPILED-LIBRARY.  All the other forms
+in the source, if any, are assembled into a single COMPILED-MAIN-PROGRAM.
+
+The top-level forms in a source file are:
+  LIBRARY: causes the production of a COMPILED-LIBRARY in the output
+  IMPORT: makes library bindings available to the main program
+  Any R5RS top-level form: executed in order in the main program.
+
+LIBRARY forms may occur in any order, and interspersed with other
+code, without affecting the result.  IMPORT forms must precede all
+R5RS top-level forms.  If no IMPORT form is found at top-level, the
+following is assumed:
+  (import (copy r5rs))
+
+Syntax definitions may not be used to expand into LIBRARY or IMPORT forms.
+
+=====
+
+Compilation:
+
+A compiled library is a form like this:
+
+(compiled-library 
+ name
+ (libraries <name> ...)
+ (syntax (define-syntax <name> <syntax-definition>) ...)
+ (export (<public-name> . <private-name) ...)
+ (prologue <string>)
+ (exec <string> ...))
+
+
+LIBRARIES specifies libraries which must be initialized before this
+library is initialized.
+
+Each definition in SYNTAX is exported from the library under the
+specified name.  The exported syntax may name top-level identifiers
+from the library, even those not exported.
+
+Any top-level reference in a syntax definition in the SYNTAX clause must be
+resolved to the private name of the identifier in the library, for proper
+hygiene to be observed.  Such syntax definitions make reference to the
+private names, not their public aliases.
+
+<syntax-definitions> may be:
+  (syntax-rules <literals> (<pattern> <template>) ...)
+  (primitive-syntax <name>)
+
+The identifiers in the EXPORT alist indicate for each public name, its
+private internal name.  It is permissible to EXPORT a name which came
+from another library, either explicitly or implicitly.
+
+The strings in EXEC are JavaScript expressions which evaluate to functions
+of one argument (a continuation) which must be executed in order to 
+initialize the library.
+
+A main program looks like this:
+(compiled-main-program
+  (libraries <name> ...)
+  (prologue <string>)
+  (exec <string> ...))
+
+
+===
+Linking
+
+The job of the linker is to assemble a collection of compiled libraries
+and a main program together into a single JavaScript executable.
+
+There must be exactly one COMPILED-MAIN-PROGRAM in a link, and the
+LIBRARIES dependencies of the main program and the libraries must be a
+directed acyclic graph.  It is an error if the same library name occurs
+more than once.  Libraries which are not connected to the main program
+are not included in the link, and their initialization will not be run.
+
+The linker then identifies the order of initializion of libraries, and
+emits the code for the program in this order:
+  * The prologues, in order, for each library and main program.
+  * A special execution context prologue.
+  * A series of JavaScript variable definitions for each EXEC string.
+  * A table of top-level executions references those variables.
+  * A special epilogue which executes the top-level executions in order.
+
+  
+
