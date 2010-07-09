@@ -1,3 +1,23 @@
+;;; COPYING NOTICE:
+;;;
+;;; The rationalize function is taken from MIT/GNU Scheme, and redistributed
+;;; here under the terms of the GNU General Public License:
+;;; ----------------------------------------------------------------------
+;;;
+;;; MIT/GNU Scheme is released under the GNU General Public License.
+;;; 
+;;; In addition, as a special exception, the Massachusetts Institute of
+;;; Technology gives permission to link the code of MIT/GNU Scheme with
+;;; OpenSSL (or with modified versions of OpenSSL that use the same
+;;; license as OpenSSL), and distribute linked combinations including the
+;;; two.  You must obey the GNU General Public License in all respects for
+;;; all of the code used other than OpenSSL.  If you modify MIT/GNU
+;;; Scheme, you may extend this exception to your version of the program,
+;;; but you are not obligated to do so.  If you do not wish to do so,
+;;; delete this exception statement from your version.
+;;; 
+;;; ----------------------------------------------------------------------
+
 ;;; SINJS Scheme library
 
 ;;;
